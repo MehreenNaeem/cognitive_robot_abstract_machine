@@ -7,6 +7,7 @@ from regular Python functions when variables are present.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import wraps
@@ -171,3 +172,9 @@ def _any_of_the_kwargs_is_a_variable(bindings: Dict[str, Any]) -> bool:
     :return: ``True`` if any value in ``bindings`` is a :class:`~krrood.entity_query_language.core.base_expressions.SymbolicExpression`, ``False`` otherwise.
     """
     return any(isinstance(binding, SymbolicExpression) for binding in bindings.values())
+
+@symbolic_function
+def matches_regex_fullmatch(pattern: str | re.Pattern[str],
+                            string: str,
+                            flags: int | re.RegexFlag = 0) -> bool:
+    return bool(re.fullmatch(pattern=pattern, string=string, flags=flags))
