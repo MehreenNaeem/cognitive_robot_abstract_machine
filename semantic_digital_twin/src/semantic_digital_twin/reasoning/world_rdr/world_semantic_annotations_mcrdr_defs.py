@@ -5,6 +5,7 @@ from krrood.entity_query_language.factories import (
     variable,
     match_variable,
 )
+from krrood.entity_query_language.predicate import matches_regex_fullmatch
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Wardrobe,
     Door,
@@ -76,21 +77,21 @@ def conditions_35528769484583703815352905256802298589(case) -> bool:
 def conclusion_35528769484583703815352905256802298589(case) -> List[Wardrobe]:
     def get_wardrobes(case: World) -> List[Wardrobe]:
         """Get possible value(s) for World.semantic_annotations of types list/set of Wardrobe"""
-        drawer = variable(Drawer, case.semantic_annotations)
-        prismatic_connection = variable(PrismaticConnection, case.connections)
+        fixed_connection = variable(FixedConnection, case.connections)
         return (
             entity(
                 inference(Wardrobe)(
-                    root=prismatic_connection.parent,
-                    drawers=drawer,
+                    root=fixed_connection.child,
                 )
             )
-            .where(prismatic_connection.child == drawer.root)
-            .grouped_by(prismatic_connection.parent)
+            .where(
+                   matches_regex_fullmatch(r"cabinet\d+", fixed_connection.child.name.name.lower()),
+                   )
             .tolist()
         )
 
     return get_wardrobes(case)
+
 
 
 def conditions_59112619694893607910753808758642808601(case) -> bool:

@@ -33,7 +33,7 @@ from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
     Pose,
 )
-from semantic_digital_twin.world_description.connections import FixedConnection
+from semantic_digital_twin.world_description.connections import FixedConnection, ActiveConnection1DOF
 from semantic_digital_twin.world_description.geometry import BoundingBox
 from semantic_digital_twin.world_description.world_entity import (
     Body,
@@ -622,3 +622,30 @@ def allclose(array1: np.ndarray, array2: np.ndarray, atol=1e-3) -> bool:
     Symbolic wrapper around `np.allclose`.
     """
     return np.allclose(array1, array2, atol=atol)
+
+@symbolic_function
+def is_container_open(
+        container: Body
+) ->bool:
+    try:
+        body_connection = container.get_first_parent_connection_of_type(
+            ActiveConnection1DOF
+        )
+    except ValueError:
+        try:
+            body_connection = container.get_first_parent_connection_of_type(
+                FixedConnection
+            )
+        except ValueError or Exception:
+            return None
+
+    joint_type = type(body_connection).__name__
+
+    # prismatic joint e.g drawers
+    if joint_type =='PrismaticConnection':
+        if body_connection.position >= 0.2:
+            return True
+        else:
+            return False
+
+    # revolute joints e.g cabinates,oven
