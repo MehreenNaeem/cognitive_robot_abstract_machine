@@ -1,5 +1,10 @@
 import logging
 
+from krrood.entity_query_language.core.base_expressions import SymbolicExpression
+from krrood.entity_query_language.core.variable import InstantiatedVariable
+from krrood.entity_query_language.explanation.explanation import explain_inference
+from krrood.entity_query_language.factories import entity, variable, in_, inference, an
+from krrood.entity_query_language.query.quantifiers import An
 from numpy.ma.testutils import (
     assert_equal,
 )  # You could replace this with numpy's regular assert for better compatibility

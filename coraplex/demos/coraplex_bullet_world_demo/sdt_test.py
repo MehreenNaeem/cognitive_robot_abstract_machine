@@ -12,13 +12,14 @@ from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction, MoveTor
 from coraplex.testing import setup_world
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.datastructures.definitions import TorsoState
+from semantic_digital_twin.reasoning.predicates import is_container_open
 from semantic_digital_twin.reasoning.world_reasoner import WorldReasoner
 from semantic_digital_twin.robots.pr2 import PR2
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Bowl,
     Spoon,
     Drawer,
-    Handle,
+    Handle, Door,
 )
 from semantic_digital_twin.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -98,36 +99,8 @@ with world.modify_world():
 
 context.evaluate_conditions = False
 
-# query about object location
 obj_type = 'Spoon'
 spoon_obj = world.get_semantic_annotations_by_name(obj_type)
-
-'''for obj in all_objs:
-    name_obj = obj.root.name.name
-    object = world.get_body_by_name(name_obj)
-    children = object.child_kinematic_structure_entities
-    parent = object.parent_kinematic_structure_entity'''
-
-close_drawer = world.get_body_by_name("cabinet10_drawer_top")
-cabinate1 = world.get_body_by_name("cabinet1")
-
-
-'''with simulated_robot:
-    (sequential
-     ([ParkArmsAction(Arms.BOTH),
-       MoveTorsoAction(TorsoState.HIGH),
-       TransportAction(
-           world.get_body_by_name("spoon.stl"),
-           Pose.from_xyz_rpy(5.1, 3.3, 0.75, yaw=1.57, reference_frame=world.root),
-           Arms.LEFT,
-           GraspDescription(
-               ApproachDirection.FRONT,
-               VerticalAlignment.TOP,
-               pr2.left_arm.end_effector,
-           ),
-       ),
-       ],context=context,).plan).perform()
-
-open_drawer = world.get_body_by_name("cabinet10_drawer_top")'''
-print()
-
+cabinate4 = world.get_body_by_name("cabinet4")
+cabinate4.child_kinematic_structure_entities[0].parent_connection.position = 1
+result = is_container_open(cabinate4,world,Door)

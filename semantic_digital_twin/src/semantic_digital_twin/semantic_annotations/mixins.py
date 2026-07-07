@@ -88,6 +88,7 @@ if TYPE_CHECKING:
     from semantic_digital_twin.world import World
     from semantic_digital_twin.semantic_annotations.semantic_annotations import (
         Drawer,
+        Cabinet,
         Door,
         Handle,
         Aperture,
@@ -1010,3 +1011,15 @@ class HasCaseAsRootBody(HasSupportingSurface, ABC):
         container_event = outer_box.as_composite_set() - inner_box.as_composite_set()
 
         return container_event
+
+@dataclass(eq=False)
+class HasCabinet(PartWholeRelationship, ABC):
+    """
+    A mixin class for semantic annotations that have cabinets.
+    """
+    cabinets: List[Cabinet] = part_whole_relationship_field(
+        default_factory=list, hash=False, kw_only=True
+    )
+    """
+    The cabinet of the semantic annotation.
+    """

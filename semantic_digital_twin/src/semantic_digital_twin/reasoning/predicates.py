@@ -3,12 +3,15 @@ from __future__ import annotations
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import trimesh.boolean
+from dns import query
 from trimesh.collision import CollisionManager
 from typing_extensions import List, TYPE_CHECKING, Iterable, Type
 
+from krrood.entity_query_language.factories import contains, variable, entity
 from krrood.entity_query_language.predicate import (
     Predicate,
     Symbol,
@@ -40,6 +43,7 @@ from semantic_digital_twin.world_description.world_entity import (
     Region,
     KinematicStructureEntity,
 )
+from test.krrood_test.dataset.semantic_world_like_classes import Door
 
 if TYPE_CHECKING:
     from semantic_digital_twin.world import World
@@ -344,7 +348,7 @@ def is_body_in_region(body: Body, region: Region) -> float:
 
 
 @dataclass
-class KinematicStructureEntitySpatialRelation(Symbol, ABC):
+class KinematicStructureEntitySpatialRelation(Predicate, ABC):
     """
     Base class for spatial relations between two KinematicStructureEntity instances.
     Implementations typically compare the centers of mass computed from the KSE's collision geometry.
@@ -362,7 +366,7 @@ class KinematicStructureEntitySpatialRelation(Symbol, ABC):
 
 
 @dataclass
-class PointSpatialRelation(Symbol, ABC):
+class PointSpatialRelation(Predicate,ABC):
     """
     Check if the point is spatially related to the other point.
     """
@@ -625,20 +629,21 @@ def allclose(array1: np.ndarray, array2: np.ndarray, atol=1e-3) -> bool:
 
 @symbolic_function
 def is_container_open(
-        container: Body
+        container: Body,
+        world: World,
+        door: Any
 ) ->bool:
     try:
         body_connection = container.get_first_parent_connection_of_type(
-            ActiveConnection1DOF
+            ActiveConnection1DOF  # drawer
         )
     except ValueError:
         try:
             body_connection = container.get_first_parent_connection_of_type(
-                FixedConnection
+                FixedConnection # cabinate
             )
         except ValueError or Exception:
             return None
-
     joint_type = type(body_connection).__name__
 
     # prismatic joint e.g drawers
@@ -649,3 +654,17 @@ def is_container_open(
             return False
 
     # revolute joints e.g cabinates,oven
+    if joint_type == 'FixedConnection':
+        connecting_doors = True if container.name.name.lower() == "cabinet4" else False
+        doors = variable(door, world.semantic_annotations)
+        if connecting_doors:
+            query =  (entity(doors)
+                      .where(doors.root.parent_kinematic_structure_entity.parent_kinematic_structure_entity == container))
+        else:
+            query = (entity(doors)
+                     .where(doors.root.parent_kinematic_structure_entity == container))
+        for q in query.evaluate():
+            if q.root.parent_connection.position >= 0.2:
+                return True
+            else:
+                return False
