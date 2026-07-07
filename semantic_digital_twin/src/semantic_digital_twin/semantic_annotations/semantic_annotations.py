@@ -30,7 +30,7 @@ from semantic_digital_twin.semantic_annotations.mixins import (
     HasApertures,
     IsPerceivable,
     HasRootBody,
-    IsStorageSpace,
+    IsStorageSpace, HasCabinet,
 )
 from semantic_digital_twin.spatial_types import (
     Point3,
@@ -458,14 +458,14 @@ class CounterTop(Furniture, HasSupportingSurface):
 
 
 @dataclass(eq=False)
-class Cabinet(Furniture, HasCaseAsRootBody, HasHandle):
+class Cabinet(Furniture, HasCaseAsRootBody,HasDoors):
     @classproperty
     def hole_direction(self) -> Vector3:
         return Vector3.NEGATIVE_X()
 
 
 @dataclass(eq=False)
-class Fridge(Cabinet, HasDoors, HasDrawers): ...
+class Fridge(HasCabinet, HasDoors, HasDrawers): ...
 
 
 @dataclass(eq=False)
@@ -481,7 +481,7 @@ class Cupboard(Cabinet, HasDoors): ...
 
 
 @dataclass(eq=False)
-class Wardrobe(Cabinet, HasDrawers, HasDoors): ...
+class Wardrobe(HasCabinet, HasDrawers): ...
 
 
 @dataclass(eq=False)
