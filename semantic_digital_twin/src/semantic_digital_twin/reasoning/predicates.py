@@ -3,16 +3,18 @@ from __future__ import annotations
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import trimesh.boolean
 from trimesh.collision import CollisionManager
 from typing_extensions import List, TYPE_CHECKING, Iterable, Type
 
+from krrood.entity_query_language.factories import variable, entity
 from krrood.entity_query_language.predicate import (
     Predicate,
     Symbol,
-    symbolic_function,
+    symbolic_function, Triple,
 )
 from krrood.entity_query_language.verbalization.vocabulary.english import Prepositions
 from krrood.entity_query_language.verbalization.vocabulary.parts_of_speech import (
@@ -33,7 +35,7 @@ from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
     Pose,
 )
-from semantic_digital_twin.world_description.connections import FixedConnection
+from semantic_digital_twin.world_description.connections import FixedConnection, ActiveConnection1DOF
 from semantic_digital_twin.world_description.geometry import BoundingBox
 from semantic_digital_twin.world_description.world_entity import (
     Body,
@@ -344,7 +346,7 @@ def is_body_in_region(body: Body, region: Region) -> float:
 
 
 @dataclass
-class KinematicStructureEntitySpatialRelation(Symbol, ABC):
+class KinematicStructureEntitySpatialRelation(Triple, ABC):
     """
     Base class for spatial relations between two KinematicStructureEntity instances.
     Implementations typically compare the centers of mass computed from the KSE's collision geometry.
@@ -360,9 +362,17 @@ class KinematicStructureEntitySpatialRelation(Symbol, ABC):
     The other KSE.
     """
 
+    @property
+    def subject(self) -> KinematicStructureEntity:
+        return self.body
+
+    @property
+    def object(self) -> KinematicStructureEntity:
+        return self.other
+
 
 @dataclass
-class PointSpatialRelation(Symbol, ABC):
+class PointSpatialRelation(Triple, ABC):
     """
     Check if the point is spatially related to the other point.
     """
@@ -376,6 +386,14 @@ class PointSpatialRelation(Symbol, ABC):
     """
     The other point.
     """
+
+    @property
+    def subject(self) -> Point3:
+        return self.point
+
+    @property
+    def object(self) -> Point3:
+        return self.other
 
 
 @dataclass
@@ -622,3 +640,45 @@ def allclose(array1: np.ndarray, array2: np.ndarray, atol=1e-3) -> bool:
     Symbolic wrapper around `np.allclose`.
     """
     return np.allclose(array1, array2, atol=atol)
+
+@symbolic_function
+def is_container_open(
+        container: Body,
+        world: World,
+        door: Any
+) ->bool:
+    try:
+        body_connection = container.get_first_parent_connection_of_type(
+            ActiveConnection1DOF  # drawer
+        )
+    except ValueError:
+        try:
+            body_connection = container.get_first_parent_connection_of_type(
+                FixedConnection # cabinate
+            )
+        except ValueError or Exception:
+            return None
+    joint_type = type(body_connection).__name__
+
+    # prismatic joint e.g drawers
+    if joint_type =='PrismaticConnection':
+        if body_connection.position >= 0.2:
+            return True
+        else:
+            return False
+
+    # revolute joints e.g cabinates,oven
+    if joint_type == 'FixedConnection':
+        connecting_doors = True if container.name.name.lower() == "cabinet4" else False
+        doors = variable(door, world.semantic_annotations)
+        if connecting_doors:
+            query =  (entity(doors)
+                      .where(doors.root.parent_kinematic_structure_entity.parent_kinematic_structure_entity == container))
+        else:
+            query = (entity(doors)
+                     .where(doors.root.parent_kinematic_structure_entity == container))
+        for q in query.evaluate():
+            if q.root.parent_connection.position >= 0.2:
+                return True
+            else:
+                return False

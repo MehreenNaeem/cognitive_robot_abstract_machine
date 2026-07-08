@@ -7,6 +7,7 @@ from regular Python functions when variables are present.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import wraps
@@ -398,3 +399,8 @@ class Is(Predicate):
     def __call__(self) -> bool:
         return self.first_entity is self.second_entity
 
+@symbolic_function
+def matches_regex_fullmatch(pattern: str | re.Pattern[str],
+                            string: str,
+                            flags: int | re.RegexFlag = 0) -> bool:
+    return bool(re.fullmatch(pattern=pattern, string=string, flags=flags))

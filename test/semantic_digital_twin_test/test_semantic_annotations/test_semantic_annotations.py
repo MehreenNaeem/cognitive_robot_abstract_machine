@@ -208,8 +208,9 @@ def test_handle_semantic_annotation_eql(apartment_world_copy):
     "semantic_annotation_type, update_existing_semantic_annotations, scenario, expected_number",
     [
         (Handle, False, None, 29),
-        (Drawer, False, None, 19),
-        (Wardrobe, False, None, 8),
+        (Drawer, False, None, 23),
+        (Wardrobe, False, None, 1),
+        (Cabinet, False, None, 5),
         (
             Door,
             False,
