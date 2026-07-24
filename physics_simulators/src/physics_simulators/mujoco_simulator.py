@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import os
+import re
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, InitVar
 from threading import RLock
@@ -28,6 +30,9 @@ class MujocoRenderer(SimulatorRenderer):
 
     def is_running(self) -> bool:
         return self.mj_viewer.is_running()
+
+    def sync(self):
+        self.mj_viewer.sync()
 
     def close(self):
         self.mj_viewer.close()
@@ -75,7 +80,7 @@ class MujocoSimulator(BaseSimulator):
         self._file_path = file_path
         root = ET.parse(file_path).getroot()
         self._name = root.attrib.get("model", self.name)
-        self._mj_spec: mujoco.MjSpec = mujoco.MjSpec.from_file(filename=self._file_path)
+        self._mj_spec: mujoco.MjSpec = self._load_model_spec(file_path)
         self._mj_spec.compiler.inertiafromgeom = self.config.get("inertiafromgeom", mujoco.mjtInertiaFromGeom.mjINERTIAFROMGEOM_TRUE)
         self._mj_spec.option.integrator = self.config.get("integrator", mujoco.mjtIntegrator.mjINT_RK4)
         self._mj_spec.option.noslip_iterations = int(self.config.get("noslip_iterations", 0))
@@ -104,6 +109,33 @@ class MujocoSimulator(BaseSimulator):
         self._mj_data = mujoco.MjData(self._mj_model)
 
         mujoco.mj_resetDataKeyframe(self._mj_model, self._mj_data, 0)
+
+    @staticmethod
+    def _load_model_spec(file_path: str) -> mujoco.MjSpec:
+        """
+        Loads the MuJoCo model spec from `file_path`, resolving any
+        ``package://`` mesh/texture URIs it contains first since MuJoCo
+        cannot open those directly.
+
+        :param file_path: Path to the MuJoCo/URDF scene file to load.
+        :return: The loaded, not-yet-compiled model spec.
+        """
+        with open(file_path) as model_file:
+            xml_text = model_file.read()
+
+        model_directory = os.path.dirname(os.path.abspath(file_path))
+        with tempfile.NamedTemporaryFile(
+            "w",
+            dir=model_directory,
+            suffix=os.path.splitext(file_path)[1],
+            delete=False,
+        ) as resolved_file:
+            resolved_file.write(xml_text)
+            resolved_file_path = resolved_file.name
+        try:
+            return mujoco.MjSpec.from_file(filename=resolved_file_path)
+        finally:
+            os.remove(resolved_file_path)
 
     def start_callback(self):
         if not self.headless:
@@ -598,6 +630,35 @@ class MujocoSimulator(BaseSimulator):
         return SimulatorCallbackResult(
             type=SimulatorCallbackResult.ResultType.SUCCESS_AFTER_EXECUTION_ON_DATA,
             info=f"Set joint {joint_name} to value {value}",
+        )
+
+    @BaseSimulator.simulator_callback
+    def set_joint_velocity(self, joint_name: str, velocity: float) -> SimulatorCallbackResult:
+        """
+        Set the velocity of a joint by its name
+
+        :param joint_name: The name of the joint
+        :param velocity: The new velocity to set
+        :return: A SimulatorCallbackResult indicating the success or failure of the operation
+        """
+        get_joint = self.get_joint(joint_name)
+        if (
+            get_joint.type
+            != SimulatorCallbackResult.ResultType.SUCCESS_WITHOUT_EXECUTION
+        ):
+            return get_joint
+        joint = get_joint.result
+        if numpy.isclose(joint.qvel[0], velocity):
+            return SimulatorCallbackResult(
+                type=SimulatorCallbackResult.ResultType.SUCCESS_WITHOUT_EXECUTION,
+                info=f"Joint {joint_name} already has velocity {velocity}",
+            )
+        joint.qvel[0] = velocity
+        if self.simulation_thread is None:
+            mujoco.mj_step1(self._mj_model, self._mj_data)
+        return SimulatorCallbackResult(
+            type=SimulatorCallbackResult.ResultType.SUCCESS_AFTER_EXECUTION_ON_DATA,
+            info=f"Set joint {joint_name} velocity to {velocity}",
         )
 
     @BaseSimulator.simulator_callback

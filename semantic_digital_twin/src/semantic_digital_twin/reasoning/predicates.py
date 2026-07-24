@@ -606,7 +606,10 @@ def is_place_occupied(
     allowed_bodies = set(allowed_bodies or [])
 
     # Build a mesh for the region box at its current pose
-    region_box_shape = box.as_shape()  # returns a Box centered at the region
+    try:
+        region_box_shape = box.as_shape()  # returns a Box centered at the region
+    except AttributeError:
+        region_box_shape = box.as_shapes()
     region_mesh = region_box_shape.mesh.copy()
     region_mesh.apply_transform(world.transform(pose, world.root).to_np())
 
