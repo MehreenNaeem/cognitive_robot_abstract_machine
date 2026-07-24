@@ -1,0 +1,53 @@
+<mujoco model="microwave_manual_split">
+  <compiler meshdir="assets" angle="radian"/>
+  <option gravity="0 0 0"/>
+
+  <visual>
+    <headlight active="1"
+               ambient="0.8 0.8 0.8"
+               diffuse="0.8 0.8 0.8"
+               specular="0.2 0.2 0.2"/>
+    <rgba haze="0.35 0.35 0.35 1"/>
+  </visual>
+
+  <asset>
+    <texture name="skybox"
+             type="skybox"
+             builtin="gradient"
+             rgb1="0.85 0.85 0.85"
+             rgb2="0.65 0.65 0.65"
+             width="512"
+             height="512"/>
+    <material name="mat_Black_main" rgba="0.006555 0.006555 0.006555 1.0"/>
+    <material name="mat_Material_001" rgba="0.0 0.0 0.0 1.0"/>
+    <material name="mat_Material_002" rgba="0.8 0.8 0.8 1.0"/>
+    <material name="mat_Material_006" rgba="0.8 0.8 0.8 1.0"/>
+    <material name="mat_text_glow" rgba="0.8 0.8 0.8 1.0"/>
+    <mesh name="body_numpad" file="microwave_body_parts/numpad.obj" inertia="shell"/>
+    <mesh name="body_body" file="microwave_body_parts/body.obj" inertia="shell"/>
+    <mesh name="body_panel" file="microwave_body_parts/panel.obj" inertia="shell"/>
+    <mesh name="body_Text" file="microwave_body_parts/Text.obj" inertia="shell"/>
+    <mesh name="body_plate1" file="microwave_body_parts/plate1.obj" inertia="shell"/>
+    <mesh name="body_panel_001" file="microwave_body_parts/panel_001.obj" inertia="shell"/>
+    <mesh name="door_glass" file="microwave_door_parts/glass.obj" inertia="shell"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 -1 2" diffuse="1 1 1"/>
+    <camera name="cam" pos="0 -1.5 0.7" xyaxes="1 0 0 0 0.45 1"/>
+
+    <body name="microwave" pos="0 0 0">
+      <geom name="body_numpad" type="mesh" mesh="body_numpad" material="mat_Black_main" contype="0" conaffinity="0"/>
+      <geom name="body_body" type="mesh" mesh="body_body" material="mat_Black_main" contype="0" conaffinity="0"/>
+      <geom name="body_panel" type="mesh" mesh="body_panel" material="mat_Material_001" contype="0" conaffinity="0"/>
+      <geom name="body_Text" type="mesh" mesh="body_Text" material="mat_text_glow" contype="0" conaffinity="0"/>
+      <geom name="body_plate1" type="mesh" mesh="body_plate1" material="mat_Material_006" contype="0" conaffinity="0"/>
+      <geom name="body_panel_001" type="mesh" mesh="body_panel_001" material="mat_Material_002" contype="0" conaffinity="0"/>
+
+      <body name="door" pos="0.141460 0.000000 0.315704">
+        <joint name="door_hinge" type="hinge" axis="0.000000 -1.000000 0.000000" limited="true" range="0 1.57" damping="0.02"/>
+        <geom name="door_glass" type="mesh" mesh="door_glass" pos="-0.141460 -0.000000 -0.315704" material="mat_Black_main" contype="0" conaffinity="0"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

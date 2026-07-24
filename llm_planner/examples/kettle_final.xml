@@ -1,0 +1,42 @@
+<mujoco model="kettle_original_colors">
+  <option gravity="0 0 0" />
+  <compiler meshdir="assets" angle="radian" />
+  <visual>
+    <headlight active="1" ambient="0.8 0.8 0.8" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" />
+    <rgba haze="0.35 0.35 0.35 1" />
+  </visual>
+  <asset>
+    <texture name="skybox" type="skybox" builtin="gradient" rgb1="0.85 0.85 0.85" rgb2="0.65 0.65 0.65" width="512" height="512" />
+    <material name="mat_dark" rgba="0.017388 0.017388 0.017388 1.0" />
+    <material name="mat_dark_001" rgba="0.017388 0.017388 0.017388 1.0" />
+    <material name="mat_metallic" rgba="1.0 1.0 1.0 1.0" />
+    <mesh name="body_Handle_2_dark" file="kettle_body_parts/body_Handle_2_dark.obj" inertia="shell" />
+    <mesh name="body_Container_edge1_dark" file="kettle_body_parts/body_Container_edge1_dark.obj" inertia="shell" />
+    <mesh name="body_Measuring_part1_dark" file="kettle_body_parts/body_Measuring_part1_dark.obj" inertia="shell" />
+    <mesh name="body_Container_2_dark_001" file="kettle_body_parts/body_Container_2_dark_001.obj" inertia="shell" />
+    <mesh name="body_Container1_metallic" file="kettle_body_parts/body_Container1_metallic.obj" inertia="shell" />
+    <mesh name="body_Handle1_dark_001" file="kettle_body_parts/body_Handle1_dark_001.obj" inertia="shell" />
+    <mesh name="lid_Cover1_dark" file="kettle_lid_parts/lid_Cover1_dark.obj" inertia="shell" />
+    <material name="mat_table" rgba="0.72 0.74 0.73 1" specular="0.06" shininess="0.10" />
+  </asset>
+  <worldbody>
+    <light pos="0 -1 2" diffuse="1 1 1" />
+    <camera name="cam" pos="0.18 -0.40 0.32" xyaxes="0.936329 0.351123 0 -0.138472 0.369259 0.918952" fovy="31" />
+    <geom name="table" type="box" pos="0 0 -0.025" size="0.55 0.45 0.025" material="mat_table" contype="1" conaffinity="1" friction="0.8 0.01 0.001" />
+    <body name="kettle" pos="0 0.08 0" euler="1.57079632679 0 0">
+      <geom name="body_Handle_2_dark" type="mesh" mesh="body_Handle_2_dark" material="mat_dark" contype="0" conaffinity="0" />
+      <geom name="body_Container_edge1_dark" type="mesh" mesh="body_Container_edge1_dark" material="mat_dark" contype="0" conaffinity="0" />
+      <geom name="body_Measuring_part1_dark" type="mesh" mesh="body_Measuring_part1_dark" material="mat_dark" contype="0" conaffinity="0" />
+      <geom name="body_Container_2_dark_001" type="mesh" mesh="body_Container_2_dark_001" material="mat_dark_001" contype="0" conaffinity="0" />
+      <geom name="body_Container1_metallic" type="mesh" mesh="body_Container1_metallic" material="mat_metallic" contype="0" conaffinity="0" />
+      <geom name="body_Handle1_dark_001" type="mesh" mesh="body_Handle1_dark_001" material="mat_dark_001" contype="0" conaffinity="0" />
+      <body name="lid" pos="-0.002622 0.136036 -0.033991">
+        <joint name="lid_hinge" type="hinge" axis="-1 0 0" limited="true" range="0 1.5" damping="0.02" />
+        <geom name="lid_Cover1_dark" type="mesh" mesh="lid_Cover1_dark" pos="0.002622 -0.136036 0.033991" material="mat_dark" contype="0" conaffinity="0" />
+      </body>
+    </body>
+  </worldbody>
+  <keyframe>
+    <key name="lid_open" qpos="1.20" />
+  </keyframe>
+</mujoco>

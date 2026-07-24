@@ -1,0 +1,340 @@
+{
+    "_type": "krrood.ripple_down_rules.rdr.GeneralRDR",
+    "start_rules": {
+        "semantic_annotations": {
+            "_type": "krrood.ripple_down_rules.rdr.MultiClassRDR",
+            "start_rule": {
+                "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                "conditions": {
+                    "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                    "user_input": "def _get_value(case):\n                        def has_bodies_named_handle(case: World) -> bool:\n                            \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Handle.\"\"\"\n                            return True\n    \n                        return has_bodies_named_handle(case)\n    ",
+                    "conclusion_type": [
+                        "builtins.bool"
+                    ],
+                    "scope": {
+                        "World": "semantic_digital_twin.world.World"
+                    },
+                    "conclusion": {
+                        "_type": "builtins.NoneType",
+                        "value": null
+                    },
+                    "mutually_exclusive": true
+                },
+                "conclusion": {
+                    "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                    "user_input": "def _get_value(case):\n    def get_handles(case: World) -> List[Handle]:\n        \"\"\"Get possible value(s) for World.semantic_annotations of types list/set of Handle\"\"\"\n        kse = variable(Body, case.kinematic_structure_entities)\n        return entity(inference(Handle)(root=kse)).where(contains(kse.name.name.lower(), 'handle')).tolist()\n    return get_handles(case)\n    ",
+                    "conclusion_type": [
+                        "semantic_digital_twin.semantic_annotations.semantic_annotations.Handle"
+                    ],
+                    "scope": {
+                        "contains": "krrood.entity_query_language.factories.contains",
+                        "List": "typing.List",
+                        "inference": "krrood.entity_query_language.factories.inference",
+                        "variable": "krrood.entity_query_language.factories.variable",
+                        "Handle": "semantic_digital_twin.semantic_annotations.semantic_annotations.Handle",
+                        "Body": "semantic_digital_twin.world_description.world_entity.Body",
+                        "entity": "krrood.entity_query_language.factories.entity",
+                        "World": "semantic_digital_twin.world.World"
+                    },
+                    "conclusion": {
+                        "_type": "builtins.NoneType",
+                        "value": null
+                    },
+                    "mutually_exclusive": false
+                },
+                "parent": null,
+                "conclusion_name": "semantic_annotations",
+                "weight": "",
+                "uid": "90574698325129464513441443063592862114",
+                "refinement": null,
+                "alternative": {
+                    "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                    "conditions": {
+                        "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                        "user_input": "def _get_value(case):\n                        def has_handles_and_HasCaseAsMainBodys(case: World) -> bool:\n                            \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Drawer.\"\"\"\n                            return True\n    \n                        return has_handles_and_HasCaseAsMainBodys(case)\n    ",
+                        "conclusion_type": [
+                            "builtins.bool"
+                        ],
+                        "scope": {
+                            "World": "semantic_digital_twin.world.World"
+                        },
+                        "conclusion": {
+                            "_type": "builtins.NoneType",
+                            "value": null
+                        },
+                        "mutually_exclusive": true
+                    },
+                    "conclusion": {
+                        "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                        "user_input": "def _get_value(case):\n    def get_drawers(case: World) -> List[Drawer]:\n        \"\"\"Get possible value(s) for World.semantic_annotations of types list/set of Drawer\"\"\"\n        handle = variable(Handle, case.semantic_annotations)\n        prismatic_connection = variable(PrismaticConnection, case.connections)\n        fixed_connection = variable(FixedConnection, case.connections)\n        return entity(inference(Drawer)(root=fixed_connection.parent, handle=handle)).where(handle.root == fixed_connection.child, fixed_connection.parent == prismatic_connection.child).tolist()\n    return get_drawers(case)\n    ",
+                        "conclusion_type": [
+                            "semantic_digital_twin.semantic_annotations.semantic_annotations.Drawer"
+                        ],
+                        "scope": {
+                            "List": "typing.List",
+                            "inference": "krrood.entity_query_language.factories.inference",
+                            "variable": "krrood.entity_query_language.factories.variable",
+                            "PrismaticConnection": "semantic_digital_twin.world_description.connections.PrismaticConnection",
+                            "FixedConnection": "semantic_digital_twin.world_description.connections.FixedConnection",
+                            "Handle": "semantic_digital_twin.semantic_annotations.semantic_annotations.Handle",
+                            "Drawer": "semantic_digital_twin.semantic_annotations.semantic_annotations.Drawer",
+                            "entity": "krrood.entity_query_language.factories.entity",
+                            "World": "semantic_digital_twin.world.World"
+                        },
+                        "conclusion": {
+                            "_type": "builtins.NoneType",
+                            "value": null
+                        },
+                        "mutually_exclusive": false
+                    },
+                    "parent": null,
+                    "conclusion_name": "semantic_annotations",
+                    "weight": "next",
+                    "uid": "331345798360792447350644865254855982739",
+                    "refinement": null,
+                    "alternative": {
+                        "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                        "conditions": {
+                            "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                            "user_input": "def _get_value(case):\n                        def has_drawers(case: World) -> bool:\n                            \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Wardrobe.\"\"\"\n                            return True\n    \n                        return has_drawers(case)\n    ",
+                            "conclusion_type": [
+                                "builtins.bool"
+                            ],
+                            "scope": {
+                                "World": "semantic_digital_twin.world.World"
+                            },
+                            "conclusion": {
+                                "_type": "builtins.NoneType",
+                                "value": null
+                            },
+                            "mutually_exclusive": true
+                        },
+                        "conclusion": {
+                            "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                            "user_input": "def _get_value(case):\n    def get_wardrobes(case: World) -> List[Wardrobe]:\n        \"\"\"Get possible value(s) for World.semantic_annotations of types list/set of Wardrobe\"\"\"\n        drawer = variable(Drawer, case.semantic_annotations)\n        prismatic_connection = variable(PrismaticConnection, case.connections)\n        return entity(inference(Wardrobe)(root=prismatic_connection.parent, drawers=drawer)).where(prismatic_connection.child == drawer.root).grouped_by(prismatic_connection.parent).tolist()\n    return get_wardrobes(case)\n    ",
+                            "conclusion_type": [
+                                "semantic_digital_twin.semantic_annotations.semantic_annotations.Wardrobe"
+                            ],
+                            "scope": {
+                                "Wardrobe": "semantic_digital_twin.semantic_annotations.semantic_annotations.Wardrobe",
+                                "entity": "krrood.entity_query_language.factories.entity",
+                                "List": "typing.List",
+                                "inference": "krrood.entity_query_language.factories.inference",
+                                "variable": "krrood.entity_query_language.factories.variable",
+                                "PrismaticConnection": "semantic_digital_twin.world_description.connections.PrismaticConnection",
+                                "Drawer": "semantic_digital_twin.semantic_annotations.semantic_annotations.Drawer",
+                                "World": "semantic_digital_twin.world.World"
+                            },
+                            "conclusion": {
+                                "_type": "builtins.NoneType",
+                                "value": null
+                            },
+                            "mutually_exclusive": false
+                        },
+                        "parent": null,
+                        "conclusion_name": "semantic_annotations",
+                        "weight": "next",
+                        "uid": "35528769484583703815352905256802298589",
+                        "refinement": null,
+                        "alternative": {
+                            "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                            "conditions": {
+                                "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                "user_input": "def _get_value(case):\n                        def has_handles_and_revolute_connections(case: World) -> bool:\n                            \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Door.\"\"\"\n                            return True\n    \n                        return has_handles_and_revolute_connections(case)\n    ",
+                                "conclusion_type": [
+                                    "builtins.bool"
+                                ],
+                                "scope": {
+                                    "World": "semantic_digital_twin.world.World"
+                                },
+                                "conclusion": {
+                                    "_type": "builtins.NoneType",
+                                    "value": null
+                                },
+                                "mutually_exclusive": true
+                            },
+                            "conclusion": {
+                                "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                "user_input": "def _get_value(case):\n    def get_doors(case: World) -> List[Door]:\n        \"\"\"Get possible value(s) for World.semantic_annotations  of type Door.\"\"\"\n        handle = variable(Handle, case.semantic_annotations)\n        revolute_connection = variable(RevoluteConnection, case.connections)\n        fixed_connection = variable(FixedConnection, case.connections)\n        return entity(inference(Door)(root=fixed_connection.parent, handle=handle)).where(fixed_connection.parent == revolute_connection.child, fixed_connection.child == handle.root).tolist()\n    return get_doors(case)\n    ",
+                                "conclusion_type": [
+                                    "semantic_digital_twin.semantic_annotations.semantic_annotations.Door"
+                                ],
+                                "scope": {
+                                    "List": "typing.List",
+                                    "inference": "krrood.entity_query_language.factories.inference",
+                                    "variable": "krrood.entity_query_language.factories.variable",
+                                    "FixedConnection": "semantic_digital_twin.world_description.connections.FixedConnection",
+                                    "Handle": "semantic_digital_twin.semantic_annotations.semantic_annotations.Handle",
+                                    "RevoluteConnection": "semantic_digital_twin.world_description.connections.RevoluteConnection",
+                                    "Door": "semantic_digital_twin.semantic_annotations.semantic_annotations.Door",
+                                    "entity": "krrood.entity_query_language.factories.entity",
+                                    "World": "semantic_digital_twin.world.World"
+                                },
+                                "conclusion": {
+                                    "_type": "builtins.NoneType",
+                                    "value": null
+                                },
+                                "mutually_exclusive": false
+                            },
+                            "parent": null,
+                            "conclusion_name": "semantic_annotations",
+                            "weight": "next",
+                            "uid": "59112619694893607910753808758642808601",
+                            "refinement": null,
+                            "alternative": {
+                                "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                                "conditions": {
+                                    "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                    "user_input": "def _get_value(case):\n                        def has_doors_with_fridge_in_their_name(case: World) -> bool:\n                            \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Fridge.\"\"\"\n                            return True\n    \n                        return has_doors_with_fridge_in_their_name(case)\n    ",
+                                    "conclusion_type": [
+                                        "builtins.bool"
+                                    ],
+                                    "scope": {
+                                        "World": "semantic_digital_twin.world.World"
+                                    },
+                                    "conclusion": {
+                                        "_type": "builtins.NoneType",
+                                        "value": null
+                                    },
+                                    "mutually_exclusive": true
+                                },
+                                "conclusion": {
+                                    "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                    "user_input": "def _get_value(case):\n    def get_fridges(case: World) -> List[Fridge]:\n        \"\"\"Get possible value(s) for World.semantic_annotations of type Fridge.\"\"\"\n        door = variable(Door, case.semantic_annotations)\n        revolute_connection = variable(RevoluteConnection, case.connections)\n        return entity(inference(Fridge)(root=revolute_connection.parent, doors=door)).where(revolute_connection.child == door.root, contains(door.root.name.name.lower(), 'fridge')).grouped_by(revolute_connection.parent).tolist()\n    return get_fridges(case)\n    ",
+                                    "conclusion_type": [
+                                        "semantic_digital_twin.semantic_annotations.semantic_annotations.Fridge"
+                                    ],
+                                    "scope": {
+                                        "Fridge": "semantic_digital_twin.semantic_annotations.semantic_annotations.Fridge",
+                                        "contains": "krrood.entity_query_language.factories.contains",
+                                        "List": "typing.List",
+                                        "inference": "krrood.entity_query_language.factories.inference",
+                                        "variable": "krrood.entity_query_language.factories.variable",
+                                        "RevoluteConnection": "semantic_digital_twin.world_description.connections.RevoluteConnection",
+                                        "Door": "semantic_digital_twin.semantic_annotations.semantic_annotations.Door",
+                                        "entity": "krrood.entity_query_language.factories.entity",
+                                        "World": "semantic_digital_twin.world.World"
+                                    },
+                                    "conclusion": {
+                                        "_type": "builtins.NoneType",
+                                        "value": null
+                                    },
+                                    "mutually_exclusive": false
+                                },
+                                "parent": null,
+                                "conclusion_name": "semantic_annotations",
+                                "weight": "next",
+                                "uid": "10840634078579061471470540436169882059",
+                                "refinement": null,
+                                "alternative": {
+                                    "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                                    "conditions": {
+                                        "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                        "user_input": "def _get_value(case):\n                    def conditions_for_world_semantic_annotations_of_type_cabinet(case: World) -> bool:\n                        \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Cabinet.\"\"\"\n                        return True\n                    return conditions_for_world_semantic_annotations_of_type_cabinet(case)\n    ",
+                                        "conclusion_type": [
+                                            "builtins.bool"
+                                        ],
+                                        "scope": {
+                                            "World": "semantic_digital_twin.world.World"
+                                        },
+                                        "conclusion": {
+                                            "_type": "builtins.NoneType",
+                                            "value": null
+                                        },
+                                        "mutually_exclusive": true
+                                    },
+                                    "conclusion": {
+                                        "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                        "user_input": "def _get_value(case):\n    def world_semantic_annotations_of_type_cabinet(case: World) -> List[Cabinet]:\n        \"\"\"Get possible value(s) for World.semantic_annotations  of type Cabinet.\"\"\"\n        door = variable(Door, case.semantic_annotations)\n        fixed_connection = variable(FixedConnection, case.connections)\n        return entity(inference(Cabinet)(root=fixed_connection.child, doors=door)).where(matches_regex_fullmatch('(cabinet\\\\d+|wardrobe|dishwasher)', fixed_connection.child.name.name.lower()), contains(door.root.name.name.lower(), fixed_connection.child.name.name.lower())).grouped_by(fixed_connection.child).tolist()\n    return world_semantic_annotations_of_type_cabinet(case)\n    ",
+                                        "conclusion_type": [
+                                            "semantic_digital_twin.semantic_annotations.semantic_annotations.Cabinet"
+                                        ],
+                                        "scope": {
+                                            "Cabinet": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cabinet",
+                                            "contains": "krrood.entity_query_language.factories.contains",
+                                            "List": "typing.List",
+                                            "inference": "krrood.entity_query_language.factories.inference",
+                                            "variable": "krrood.entity_query_language.factories.variable",
+                                            "matches_regex_fullmatch": "krrood.entity_query_language.predicate.matches_regex_fullmatch",
+                                            "FixedConnection": "semantic_digital_twin.world_description.connections.FixedConnection",
+                                            "Door": "semantic_digital_twin.semantic_annotations.semantic_annotations.Door",
+                                            "entity": "krrood.entity_query_language.factories.entity",
+                                            "World": "semantic_digital_twin.world.World"
+                                        },
+                                        "conclusion": {
+                                            "_type": "builtins.NoneType",
+                                            "value": null
+                                        },
+                                        "mutually_exclusive": false
+                                    },
+                                    "parent": null,
+                                    "conclusion_name": "semantic_annotations",
+                                    "weight": "next",
+                                    "uid": "99828403881738252604561834486102211484",
+                                    "refinement": null,
+                                    "alternative": {
+                                        "_type": "krrood.ripple_down_rules.rules.MultiClassTopRule",
+                                        "conditions": {
+                                            "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                            "user_input": "def _get_value(case):\n    def conditions_for_world_semantic_annotations_of_type_drawer(case: World) -> bool:\n        \"\"\"Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Drawer.\"\"\"\n        return True\n    return conditions_for_world_semantic_annotations_of_type_drawer(case)\n    ",
+                                            "conclusion_type": [
+                                                "builtins.bool"
+                                            ],
+                                            "scope": {
+                                                "World": "semantic_digital_twin.world.World"
+                                            },
+                                            "conclusion": {
+                                                "_type": "builtins.NoneType",
+                                                "value": null
+                                            },
+                                            "mutually_exclusive": false
+                                        },
+                                        "conclusion": {
+                                            "_type": "krrood.ripple_down_rules.datastructures.callable_expression.CallableExpression",
+                                            "user_input": "def _get_value(case):\n    def world_semantic_annotations_of_type_drawer(case: World) -> List[Drawer]:\n        \"\"\"Get possible value(s) for World.semantic_annotations  of type Drawer.\"\"\"\n        prismatic_connection = variable(PrismaticConnection, case.connections)\n        return (entity(inference(Drawer)(root=prismatic_connection.child))\n                .where(contains(prismatic_connection.child.name.name.lower(), \"drawer\"),\n                       InsideOf(prismatic_connection.child, prismatic_connection.parent).compute_containment_ratio() > 0.7,\n                       )\n                .tolist()\n                )\n    return world_semantic_annotations_of_type_drawer(case)\n    ",
+                                            "conclusion_type": [
+                                                "builtins.set",
+                                                "semantic_digital_twin.semantic_annotations.semantic_annotations.Drawer",
+                                                "builtins.list"
+                                            ],
+                                            "scope": {
+                                                "contains": "krrood.entity_query_language.factories.contains",
+                                                "InsideOf": "semantic_digital_twin.reasoning.predicates.InsideOf",
+                                                "inference": "krrood.entity_query_language.factories.inference",
+                                                "variable": "krrood.entity_query_language.factories.variable",
+                                                "List": "typing.List",
+                                                "PrismaticConnection": "semantic_digital_twin.world_description.connections.PrismaticConnection",
+                                                "Drawer": "semantic_digital_twin.semantic_annotations.semantic_annotations.Drawer",
+                                                "entity": "krrood.entity_query_language.factories.entity",
+                                                "World": "semantic_digital_twin.world.World"
+                                            },
+                                            "conclusion": {
+                                                "_type": "builtins.NoneType",
+                                                "value": null
+                                            },
+                                            "mutually_exclusive": false
+                                        },
+                                        "parent": null,
+                                        "conclusion_name": "semantic_annotations",
+                                        "weight": "next",
+                                        "uid": "140346364196387680912865924047987037688",
+                                        "refinement": null,
+                                        "alternative": null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "generated_python_file_name": "world_semantic_annotations_mcrdr",
+            "name": "semantic_annotations",
+            "case_type": "semantic_digital_twin.world.World",
+            "case_name": "World"
+        }
+    },
+    "generated_python_file_name": "world_rdr",
+    "name": "world",
+    "case_type": "semantic_digital_twin.world.World",
+    "case_name": "World"
+}
