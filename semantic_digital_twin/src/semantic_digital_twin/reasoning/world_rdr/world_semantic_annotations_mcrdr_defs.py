@@ -4,12 +4,15 @@ from krrood.entity_query_language.factories import (
     inference,
     variable,
 )
+from krrood.entity_query_language.predicate import matches_regex_fullmatch
+from semantic_digital_twin.reasoning.predicates import InsideOf
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Wardrobe,
     Door,
     Drawer,
     Fridge,
     Handle,
+    Cabinet,
 )
 from semantic_digital_twin.world import World
 from semantic_digital_twin.world_description.connections import (
@@ -69,11 +72,15 @@ def conclusion_331345798360792447350644865254855982739(case) -> List[Drawer]:
         prismatic_connection = variable(PrismaticConnection, case.connections)
         fixed_connection = variable(FixedConnection, case.connections)
         return (
-            entity(inference(Drawer)(root=fixed_connection.parent, handle=handle))
+            entity(inference(Drawer)(root=prismatic_connection.child))
             .where(
-                handle.root == fixed_connection.child,
-                fixed_connection.parent == prismatic_connection.child,
+                contains(prismatic_connection.child.name.name.lower(), "drawer"),
+                InsideOf(
+                    prismatic_connection.child, prismatic_connection.parent
+                ).compute_containment_ratio()
+                > 0.7,
             )
+            .grouped_by(prismatic_connection.child)
             .tolist()
         )
 
@@ -97,17 +104,20 @@ def conclusion_35528769484583703815352905256802298589(case) -> List[Wardrobe]:
         Get possible value(s) for World.semantic_annotations of types list/set of
         Wardrobe.
         """
-        drawer = variable(Drawer, case.semantic_annotations)
-        prismatic_connection = variable(PrismaticConnection, case.connections)
+        door = variable(Door, case.semantic_annotations)
+        fixed_connection = variable(FixedConnection, case.connections)
         return (
-            entity(
-                inference(Wardrobe)(
-                    root=prismatic_connection.parent,
-                    drawers=drawer,
-                )
+            entity(inference(Wardrobe)(root=fixed_connection.child, doors=door))
+            .where(
+                matches_regex_fullmatch(
+                    "wardrobe", fixed_connection.child.name.name.lower()
+                ),
+                contains(
+                    door.root.name.name.lower(),
+                    fixed_connection.child.name.name.lower(),
+                ),
             )
-            .where(prismatic_connection.child == drawer.root)
-            .grouped_by(prismatic_connection.parent)
+            .grouped_by(fixed_connection.child)
             .tolist()
         )
 
@@ -174,3 +184,34 @@ def conclusion_10840634078579061471470540436169882059(case) -> List[Fridge]:
         )
 
     return get_fridges(case)
+
+def conditions_99828403881738252604561834486102211484(case) -> bool:
+        def conditions_for_world_semantic_annotations_of_type_cabinet(
+            case: World,
+        ) -> bool:
+            """Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Cabinet."""
+            return True
+
+        return conditions_for_world_semantic_annotations_of_type_cabinet(case)
+
+def conclusion_99828403881738252604561834486102211484(case) -> List[Cabinet]:
+    def world_semantic_annotations_of_type_cabinet(case: World) -> List[Cabinet]:
+        """Get possible value(s) for World.semantic_annotations  of type Cabinet."""
+        door = variable(Door, case.semantic_annotations)
+        fixed_connection = variable(FixedConnection, case.connections)
+        return (
+            entity(inference(Cabinet)(root=fixed_connection.child, doors=door))
+            .where(
+                matches_regex_fullmatch(
+                    "(cabinet\\d+|dishwasher)", fixed_connection.child.name.name.lower()
+                ),
+                contains(
+                    door.root.name.name.lower(),
+                    fixed_connection.child.name.name.lower(),
+                ),
+            )
+            .grouped_by(fixed_connection.child)
+            .tolist()
+        )
+
+    return world_semantic_annotations_of_type_cabinet(case)

@@ -48,4 +48,9 @@ def classify(
         conclusions.update(
             make_set(conclusion_10840634078579061471470540436169882059(case))
         )
+
+    if conditions_99828403881738252604561834486102211484(case):
+        conclusions.update(
+            make_set(conditions_99828403881738252604561834486102211484(case))
+        )
     return conclusions

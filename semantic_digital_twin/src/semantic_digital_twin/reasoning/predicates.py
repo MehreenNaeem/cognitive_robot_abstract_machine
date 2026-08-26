@@ -13,7 +13,7 @@ from typing_extensions import List, TYPE_CHECKING, Iterable, Type
 from krrood.entity_query_language.predicate import (
     Predicate,
     Symbol,
-    symbolic_function,
+    symbolic_function,Triple
 )
 from krrood.entity_query_language.verbalization.vocabulary.english import Prepositions
 from krrood.entity_query_language.verbalization.vocabulary.parts_of_speech import (
@@ -351,7 +351,7 @@ def is_body_in_region(body: Body, region: Region) -> float:
 
 
 @dataclass
-class KinematicStructureEntitySpatialRelation(Symbol, ABC):
+class KinematicStructureEntitySpatialRelation(Triple,ABC):
     """
     Base class for spatial relations between two KinematicStructureEntity instances.
 
@@ -368,6 +368,14 @@ class KinematicStructureEntitySpatialRelation(Symbol, ABC):
     """
     The other KSE.
     """
+
+    @property
+    def subject(self) -> KinematicStructureEntity:
+        return self.body
+
+    @property
+    def object(self) -> KinematicStructureEntity:
+        return self.other
 
 
 @dataclass

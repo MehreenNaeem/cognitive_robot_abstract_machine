@@ -716,7 +716,7 @@ class Cupboard(Cabinet): ...
 
 
 @dataclass(eq=False)
-class Wardrobe(Cabinet): ...
+class Wardrobe(Furniture, HasCaseAsRootBody, HasHandle, HasDoors, HasDrawers): ...
 
 
 @dataclass(eq=False)
@@ -985,16 +985,18 @@ class PotLid(Lid):
     A pot lid.
     """
 
+@dataclass(eq=False)
+class Cuttlery(HasRootBody): ...
 
 @dataclass(eq=False)
-class Plate(HasSupportingSurface):
+class Plate(HasSupportingSurface,Cuttlery):
     """
     A plate.
     """
 
 
 @dataclass(eq=False)
-class Bowl(HasSupportingSurface, IsPerceivable):
+class Bowl(HasSupportingSurface, Cuttlery,IsPerceivable):
     """
     A bowl.
     """
@@ -1354,11 +1356,6 @@ class SaltPepperShaker(HasRootBody):
     """
     A salt and pepper shaker.
     """
-
-
-@dataclass(eq=False)
-class Cuttlery(HasRootBody): ...
-
 
 @dataclass(eq=False)
 class Fork(Cuttlery):
