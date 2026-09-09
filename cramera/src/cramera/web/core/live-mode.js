@@ -15,6 +15,13 @@
 (function (global) {
   'use strict';
 
+  const DEFAULT_BRIDGE_PORT = '8765';
+  /* Port the live bridge listens on unless the page names another one.
+     Must match cramera.live.http.DEFAULT_PORT. */
+
+  const BRIDGE_PARAMETER = /[?&]live=([\w.:-]+)/;
+  /* `?live=host:port` overrides where the bridge is looked for. */
+
   const SCENE_NAME = '__live__';
   /* Name of the reserved scene the bridge bundles the running demo into.
      Must match cramera.paths.LIVE_SCENE_NAME. */
@@ -34,6 +41,15 @@
     NAVIGATE: NAVIGATE,
     TOGGLE: TOGGLE,
     isLiveScene: isLiveScene,
+
+    /* Where the running demo's bridge is served from, for `location` (defaults to the
+       page's own). Every panel that talks to the demo asks here, so the override is
+       honoured in one place instead of once per panel. */
+    bridgeUrl: function (location) {
+      const where = location || window.location;
+      const named = BRIDGE_PARAMETER.exec(where.search);
+      return 'http://' + (named ? named[1] : (where.hostname + ':' + DEFAULT_BRIDGE_PORT));
+    },
 
     /* Whether the live pose stream may drive the scene `sceneName` is showing. */
     attachable: function (sceneName) {

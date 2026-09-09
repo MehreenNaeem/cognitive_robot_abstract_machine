@@ -198,3 +198,24 @@ test('a deliberately chosen recorded scene is never auto-attached away from', fu
   assert.strictEqual(live.shouldAutoAttach('PR2_Apartment', true, false, false, true), false);
   assert.strictEqual(live.shouldAutoAttach('', false, false, false, true), true);
 });
+
+// %% where the running demo's bridge is
+test('the bridge is looked for on the page host, at the bridge port', function () {
+  const live = load();
+  assert.strictEqual(
+    live.bridgeUrl({ hostname: 'somehost', search: '?scene=PR2_Apartment' }),
+    'http://somehost:8765'
+  );
+});
+
+test('a ?live= parameter names the bridge instead', function () {
+  /*
+   * A demo running on another machine is reached by naming it in the URL; every panel
+   * that talks to the demo has to honour that, so they all ask here.
+   */
+  const live = load();
+  assert.strictEqual(
+    live.bridgeUrl({ hostname: 'somehost', search: '?live=other.host:9000' }),
+    'http://other.host:9000'
+  );
+});

@@ -19,13 +19,42 @@ from semantic_digital_twin.world_description.geometry import Mesh
 from semantic_digital_twin.world_description.shape_collection import ShapeCollection
 from semantic_digital_twin.world_description.world_entity import Body
 
+from coraplex.robot_plans.actions.core.pick_up import PickUpAction
+from coraplex.robot_plans.actions.core.placing import PlaceAction
+from llm_planner.env_planner.triplet_generator import LanguageModelUnreachable
+from semantic_digital_twin.semantic_annotations.semantic_annotations import (
+    Bowl,
+    Drawer,
+    Handle,
+)
+
 from cramera import paths
+from cramera.live import action_sequence
 from cramera.live.bridge import Bridge
 from cramera.live.http import serve
 from cramera.live.recording import Recording
 
-from .test_live_bridge import shaped_body, world_with
+from .test_action_sequence import (
+    PUT_THE_BOWL_IN_THE_DRAWER,
+    ScriptedLanguageModel,
+    annotated_world,
+)
+from .test_live_bridge import (
+    region_at,
+    shaped_body,
+    world_with,
+    world_with_region,
+)
 from .test_server import get, get_json
+
+
+class UnreachableLanguageModel:
+    """A language model whose endpoint refuses every request."""
+
+    URL = "http://nothing-listening:3000"
+
+    def complete(self, prompt: str) -> str:
+        raise LanguageModelUnreachable(self.URL, ConnectionRefusedError("refused"))
 
 
 def post(url, payload=None, timeout=10):
@@ -85,6 +114,7 @@ class TestReadOnlyEndpoints:
             "frames": {},
             "base": None,
             "objects": {},
+            "regions": {},
             "modelBases": {},
             "markersVersion": 0,
         }
@@ -464,6 +494,94 @@ class TestMove:
         except urllib.error.HTTPError as error:
             status = error.code
         assert status == 404
+
+
+class TestPublishedRegions:
+    def test_the_catalog_carries_the_worlds_regions_beside_its_objects(
+        self, server, bridge
+    ):
+        """
+        The viewer asks once and learns about both, so a region shows up without a
+        second round trip.
+        """
+        bridge.attach(world_with_region(region_at("free_places", 0.2)))
+
+        payload = get_json(server + "/objects")
+
+        assert [entry["key"] for entry in payload["regions"]] == ["world/free_places"]
+        assert payload["objects"] == []
+
+    def test_the_state_streams_every_regions_pose(self, server, bridge):
+        bridge.attach(world_with_region(region_at("free_places", 0.2)))
+        bridge.snapshot()
+
+        assert list(get_json(server + "/state")["regions"]) == ["world/free_places"]
+
+
+class TestActionSequenceEndpoint:
+    """
+    The task-grounding panel's endpoint, answered with a scripted language model so no
+    request ever leaves the process.
+    """
+
+    @pytest.fixture(autouse=True)
+    def scripted_model(self, monkeypatch):
+        """
+        Answer every prompt with the sequence for the fixture world's bowl and drawer.
+        """
+        monkeypatch.setattr(
+            action_sequence,
+            "configured_language_model",
+            lambda: ScriptedLanguageModel(answers=[PUT_THE_BOWL_IN_THE_DRAWER] * 3),
+        )
+
+    def test_a_task_is_answered_with_the_actions_that_carry_it_out(
+        self, server, bridge
+    ):
+        bridge.attach(annotated_world(Bowl, Drawer, Handle))
+
+        status, body = post(server + "/action_sequence", {"task": "Put the bowl away"})
+
+        assert status == 200
+        assert body["ok"] is True
+        assert body["task"] == "Put the bowl away"
+        assert [action["action"] for action in body["actions"]] == [
+            PickUpAction.__name__,
+            PlaceAction.__name__,
+        ]
+
+    def test_an_empty_task_is_rejected(self, server, bridge):
+        bridge.attach(annotated_world(Bowl, Drawer))
+
+        status, body = post(server + "/action_sequence", {"task": "   "})
+
+        assert status == 400
+        assert body["ok"] is False
+
+    def test_a_task_without_an_attached_demo_is_refused(self, server):
+        status, body = post(server + "/action_sequence", {"task": "Put the bowl away"})
+
+        assert status == 409
+        assert body["ok"] is False
+
+    def test_an_unreachable_language_model_is_reported_as_such(
+        self, server, bridge, monkeypatch
+    ):
+        """
+        A refused endpoint has to come back as a JSON error; dropping the connection
+        would leave the panel with the browser's bare "Failed to fetch".
+        """
+        bridge.attach(annotated_world(Bowl, Drawer))
+        monkeypatch.setattr(
+            action_sequence,
+            "configured_language_model",
+            lambda: UnreachableLanguageModel(),
+        )
+
+        status, body = post(server + "/action_sequence", {"task": "Put the bowl away"})
+
+        assert status == 502
+        assert UnreachableLanguageModel.URL in body["error"]
 
 
 class TestOptions:

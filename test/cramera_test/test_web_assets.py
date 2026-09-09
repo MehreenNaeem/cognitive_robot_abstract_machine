@@ -156,6 +156,27 @@ class TestBinaryGltfLoading:
         assert "fmt === '%s'" % suffix in panel
 
 
+class TestRegionOverlay:
+    """
+    The world's regions are published apart from the loose objects, and the scene panel
+    has to read them from where the bridge puts them (see
+    :meth:`cramera.live.bridge.Bridge.publish_regions`).
+    """
+
+    SCENE_PANEL = "panels/robot_scene/panel.js"
+
+    def test_the_panel_draws_the_regions_the_catalog_carries(self):
+        assert "d.regions" in read(self.SCENE_PANEL)
+
+    def test_the_panel_streams_every_regions_pose(self):
+        assert "st.regions" in read(self.SCENE_PANEL)
+
+    def test_the_regions_have_a_layer_of_their_own(self):
+        panel = read(self.SCENE_PANEL)
+        assert 'id="lyr-regions"' in panel
+        assert "bindLayer('lyr-regions', 'setRegionsVisible')" in panel
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 class TestJsUnits:
     def run_node(self, name: str) -> None:
@@ -178,6 +199,9 @@ class TestJsUnits:
 
     def test_graph_panel(self):
         self.run_node("test_graph_panel.js")
+
+    def test_action_sequence_panel(self):
+        self.run_node("test_action_sequence_panel.js")
 
     def test_model_constraints(self):
         self.run_node("test_model_constraints.js")

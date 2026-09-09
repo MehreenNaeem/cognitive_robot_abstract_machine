@@ -4,21 +4,39 @@ from semantic_digital_twin.world import World
 from dataclasses import dataclass
 from enum import StrEnum
 
-from semantic_digital_twin.semantic_annotations.mixins import HasHandle
+from coraplex.robot_plans.actions.base import ActionDescription
+from coraplex.robot_plans.actions.core.container import OpenAction, CloseAction
+from coraplex.robot_plans.actions.core.pick_up import PickUpAction
+from coraplex.robot_plans.actions.core.placing import PlaceAction
+from coraplex.robot_plans.actions.composite.tool_based import (
+    CuttingAction,
+    MixingAction,
+    PouringAction,
+)
+from llm_planner.env_reasoner.action_constraints import AVAILABLE_ACTIONS
+from semantic_digital_twin.semantic_annotations.mixins import (
+    HasDoors,
+    HasHandle,
+    IsStorageSpace,
+)
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Bread,
     Cabinet,
+    CookingContainer,
     CounterTop,
     Cuttlery,
     Drawer,
     Food,
+    FoodContainer,
     Fruit,
     Furniture,
     Milk,
     Oven,
     Shelf,
     Sink,
+    Table,
     TomatoSoup,
+    ToolWithHandle,
     Vegetable,
 )
 from semantic_digital_twin.world_description.world_entity import SemanticAnnotation
@@ -74,6 +92,7 @@ AFFORDANCE_RULES: list[AffordanceRule] = [
         Vegetable, frozenset({ObjectAffordance.GRASPABLE, ObjectAffordance.CUTABLE})
     ),
     AffordanceRule(Food, frozenset({ObjectAffordance.GRASPABLE})),
+    AffordanceRule(FoodContainer, frozenset({ObjectAffordance.GRASPABLE})),
     AffordanceRule(Furniture, frozenset({ObjectAffordance.RECEPTACLE})),
     AffordanceRule(Cabinet, frozenset({ObjectAffordance.RECEPTACLE})),
     AffordanceRule(Drawer, frozenset({ObjectAffordance.RECEPTACLE})),
@@ -84,6 +103,9 @@ AFFORDANCE_RULES: list[AffordanceRule] = [
     AffordanceRule(Cuttlery, frozenset({ObjectAffordance.GRASPABLE})),
     AffordanceRule(
         HasHandle, frozenset({ObjectAffordance.OPENABLE, ObjectAffordance.CLOSABLE})
+    ),
+    AffordanceRule(
+        HasDoors, frozenset({ObjectAffordance.OPENABLE, ObjectAffordance.CLOSABLE})
     ),
 ]
 
@@ -124,6 +146,115 @@ class ObjectAffordanceReasoner:
         return frozenset(affordances)
 
 
+@dataclass(frozen=True)
+class ActionAffordanceRequirement:
+    """
+    States the affordances a semantic annotation type must provide for :attr:`action` to
+    be performable on it.
+    """
+
+    action: type[ActionDescription]
+    """
+    Action class this requirement applies to.
+    """
+
+    required_affordances: frozenset[ObjectAffordance]
+    """
+    Affordances an object must provide, all of them, for :attr:`action` to be
+    performable on it.
+    """
+
+
+#: Object-directed actions from :data:`~llm_planner.env_reasoner.action_constraints.AVAILABLE_ACTIONS`,
+#: matched to the affordances they require of their target object.
+ACTION_AFFORDANCE_REQUIREMENTS: list[ActionAffordanceRequirement] = [
+    ActionAffordanceRequirement(OpenAction, frozenset({ObjectAffordance.OPENABLE})),
+    ActionAffordanceRequirement(CloseAction, frozenset({ObjectAffordance.CLOSABLE})),
+    ActionAffordanceRequirement(PickUpAction, frozenset({ObjectAffordance.GRASPABLE})),
+    ActionAffordanceRequirement(PlaceAction, frozenset({ObjectAffordance.GRASPABLE})),
+    ActionAffordanceRequirement(CuttingAction, frozenset({ObjectAffordance.CUTABLE})),
+    ActionAffordanceRequirement(PouringAction, frozenset({ObjectAffordance.POURABLE})),
+]
+
+
+@dataclass(frozen=True)
+class ActionParameterTypeRequirement:
+    """
+    Requires a named parameter of :attr:`action` to be a subclass of one of
+    :attr:`accepted_types`.
+
+    This captures constraints the affordance model cannot express, such as a tool that
+    has to be held by its handle, or a place target that has to be a storage space.
+    """
+
+    action: type[ActionDescription]
+    """
+    Action class this requirement applies to.
+    """
+
+    parameter: str
+    """
+    Name of the action parameter the requirement constrains.
+    """
+
+    accepted_types: frozenset[type[SemanticAnnotation]]
+    """
+    Semantic annotation types the parameter's object may be a subclass of; a subclass
+    of any one of them satisfies the requirement.
+    """
+
+
+#: Per-parameter semantic type constraints, matched to actions in
+#: :data:`~llm_planner.env_reasoner.action_constraints.AVAILABLE_ACTIONS`.
+ACTION_PARAMETER_TYPE_REQUIREMENTS: list[ActionParameterTypeRequirement] = [
+    ActionParameterTypeRequirement(MixingAction, "tool", frozenset({ToolWithHandle})),
+    ActionParameterTypeRequirement(
+        MixingAction, "container", frozenset({CookingContainer})
+    ),
+    ActionParameterTypeRequirement(
+        PlaceAction, "target_location", frozenset({IsStorageSpace, Table})
+    ),
+]
+
+
+def actions_available_for(
+    reasoner: ObjectAffordanceReasoner, annotation_type: type[SemanticAnnotation]
+) -> list[type[ActionDescription]]:
+    """
+    Determine which available actions can be performed with a semantic annotation type.
+
+    An action is available when ``annotation_type`` provides every affordance in a
+    matching :data:`ACTION_AFFORDANCE_REQUIREMENTS` entry, or is a subclass of one of
+    the accepted types in a matching :data:`ACTION_PARAMETER_TYPE_REQUIREMENTS` entry.
+    Only actions in
+    :data:`~llm_planner.env_reasoner.action_constraints.AVAILABLE_ACTIONS` are
+    considered.
+
+    :param reasoner: Reasoner computing the affordances of ``annotation_type``.
+    :param annotation_type: A semantic annotation class to check actions against.
+    :return: The matching actions, affordance matches first, without duplicates.
+    """
+    object_affordances = reasoner.affordances_for(annotation_type)
+    available: list[type[ActionDescription]] = []
+    for requirement in ACTION_AFFORDANCE_REQUIREMENTS:
+        if (
+            requirement.action in AVAILABLE_ACTIONS
+            and requirement.action not in available
+            and requirement.required_affordances <= object_affordances
+        ):
+            available.append(requirement.action)
+    for requirement in ACTION_PARAMETER_TYPE_REQUIREMENTS:
+        if (
+            requirement.action in AVAILABLE_ACTIONS
+            and requirement.action not in available
+            and issubclass(annotation_type, tuple(requirement.accepted_types))
+        ):
+            available.append(requirement.action)
+    return available
+
+
+'''
+#Usage Example:
 if __name__ == "__main__":
     from semantic_digital_twin.semantic_annotations.semantic_annotations import (
         Apple,
@@ -131,22 +262,11 @@ if __name__ == "__main__":
         Drawer,
         TunaCan,
         Spoon,
+        Cabinet,
     )
 
     reasoner = ObjectAffordanceReasoner()
-    for demo_type in [Apple, Bread, Milk, TunaCan, Drawer, Door,Spoon]:
+    for demo_type in [Apple, Bread, Milk, TunaCan, Drawer, Door, Spoon, Cabinet]:
         demo_affordances = reasoner.affordances_for(demo_type)
         print(f"{demo_type.__name__}: {sorted(a.value for a in demo_affordances)}")
-
-
-def objects_in_environment(world: World) -> set[str]:
-    """
-    Collect the distinct semantic annotation types present in ``world``.
-
-    :param world: The world whose semantic annotations are inspected.
-    :return: The upper-case name of every distinct semantic annotation type
-        found in :attr:`World.semantic_annotations`, e.g. ``{"DRAWER", "CABINET"}``.
-    """
-    return {
-        type(annotation).__name__.upper() for annotation in world.semantic_annotations
-    }
+'''

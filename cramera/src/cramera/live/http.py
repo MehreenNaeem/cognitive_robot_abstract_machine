@@ -7,7 +7,8 @@ HTTP endpoints of the live bridge (default port 8765).
                   partAnnotations}
     GET /state   {sequenceNumber, frames: {prefixed_joint: position},
                   base: pose, objects: {mesh_key: pose}}
-    GET /objects geometry catalog (mesh served via /mesh?key=)
+    GET /objects {objects, regions}  geometry catalog of the loose objects and of the
+                  world's regions (mesh served via /mesh?key=)
     GET /markers {version, markers: [{topic, ns, id, kind, pose, scale, color,
                   opacity, points, text}]}  the CRAM debug-marker overlay
     GET /live_scene  {scene}  bundles the running demo's *current* world into a
@@ -25,6 +26,10 @@ HTTP endpoints of the live bridge (default port 8765).
     GET /recording  {state: idle|recording|finalized, frameCount, durationSeconds,
                       sceneName}  see :mod:`cramera.live.recording`
     POST /move   queue an object move (applied on the simulation thread)
+    POST /action_sequence  {task} -> {ok, task, actions: [{action, sourceObject,
+                      targetObject}], objects}  the action sequence a language model
+                      proposes for a task statement, grounded in the attached world
+                      (see :mod:`cramera.live.action_sequence`)
     POST /recording/stop     finalize the current recording into a scene bundle under
                               :func:`cramera.paths.local_scenes_directory`
     POST /recording/discard  drop the current recording and its bundle, if any
@@ -70,6 +75,28 @@ from cramera.logging_setup import get_logger
 from cramera.onboard.scene_index import InvalidSceneName
 
 logger = get_logger(__name__)
+
+try:
+    from llm_planner.env_planner.triplet_generator import (
+        ActionSequencePredictionError,
+        LanguageModelUnreachable,
+    )
+
+    from cramera.action_sequence import NoTask
+    from cramera.live.action_sequence import LiveActionSequence, NoAttachedWorld
+
+    ACTION_SEQUENCE_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on the environment
+    ACTION_SEQUENCE_AVAILABLE = False
+    logger.warning(
+        "llm_planner not importable - serving the bridge without action-sequence "
+        "prediction"
+    )
+
+NO_ACTION_SEQUENCE_MESSAGE = "llm_planner is not available in this environment"
+"""
+What the action-sequence endpoint answers with when llm_planner is not importable.
+"""
 
 DEFAULT_PORT = int(os.environ.get("LIVE_VIZ_PORT", "8765"))
 
@@ -127,7 +154,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/transforms"):
             return self._send_json(self.bridge.get_transforms())
         if self.path.startswith("/objects"):
-            return self._send_json({"objects": self.bridge.object_catalog()})
+            return self._send_json(
+                {
+                    "objects": self.bridge.object_catalog(),
+                    "regions": self.bridge.region_catalog(),
+                }
+            )
         if self.path.startswith("/mesh"):
             return self._send_mesh()
         if self.path.startswith("/live_scene"):
@@ -210,6 +242,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return self._discard_recording()
         if self.path == "/recording/save":
             return self._save_recording()
+        if self.path.startswith("/action_sequence"):
+            return self._predict_action_sequence()
         self.queue_requested_move()
 
     def _stop_recording(self) -> None:
@@ -278,6 +312,32 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": str(error)}, 409)
         recording.discard()
         self._send_json({"ok": True, "scene": name})
+
+    def _predict_action_sequence(self) -> None:
+        """
+        Answer one task statement with the action sequence that carries it out.
+
+        The prediction asks a language model and can take a while; the bridge serves
+        requests on threads, so the viewer's polling endpoints stay responsive
+        meanwhile.
+        """
+        if not ACTION_SEQUENCE_AVAILABLE:
+            return self._send_json(
+                {"ok": False, "error": NO_ACTION_SEQUENCE_MESSAGE}, code=501
+            )
+        length = int(self.headers.get("Content-Length") or 0)
+        payload = json.loads(self.rfile.read(length) or b"{}")
+        try:
+            prediction = LiveActionSequence(bridge=self.bridge).predict(
+                str(payload.get("task") or "")
+            )
+        except NoTask as error:
+            return self._send_json({"ok": False, "error": str(error)}, code=400)
+        except NoAttachedWorld as error:
+            return self._send_json({"ok": False, "error": str(error)}, code=409)
+        except (ActionSequencePredictionError, LanguageModelUnreachable) as error:
+            return self._send_json({"ok": False, "error": str(error)}, code=502)
+        return self._send_json(prediction.to_payload())
 
     def set_marker_topic(self) -> None:
         """

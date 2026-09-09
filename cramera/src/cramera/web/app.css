@@ -211,6 +211,7 @@ body{
   flex:0 0 auto;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
   padding:3px 8px;border-radius:3px;color:#04121a
 }
+.ansrow .tag.step{background:var(--step)}
 .ansrow .body{font-size:12.5px;line-height:1.45}
 .ansrow .body .name{font-weight:600;color:var(--ink)}
 .ansrow .body .sub{color:var(--muted);display:block;margin-top:2px}

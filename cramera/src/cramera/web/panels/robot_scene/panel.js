@@ -38,6 +38,7 @@ Panels.define('robot-scene', function (root, bus) {
     '  <div id="layers-panel" class="layers-panel">' +
     '    <div class="lp-title">Layers</div>' +
     '    <label class="lp-row"><input type="checkbox" id="lyr-objects" checked><span>Bench objects</span></label>' +
+    '    <label class="lp-row" title="areas the world model declares (supporting surfaces, searched places) — drawn where they sit, and nothing can be dragged onto them"><input type="checkbox" id="lyr-regions" checked><span>World regions</span></label>' +
     '    <label class="lp-row" title="debug markers the CRAM system publishes (collisions, costmaps, spatial types)"><input type="checkbox" id="lyr-markers" checked><span>ROS markers</span><button id="marker-gear" class="marker-gear" title="marker topics and namespaces">⚙</button></label>' +
     '    <div id="marker-settings" class="marker-settings hidden"></div>' +
     '    <label class="lp-row" title="an axis triad on every frame of the world — URDF links and loose objects (red X, green Y, blue Z)"><input type="checkbox" id="lyr-frames"><span>TF frames</span><button id="frame-gear" class="layer-gear" title="frame axis size and names">⚙</button></label>' +
@@ -204,7 +205,11 @@ Panels.define('robot-scene', function (root, bus) {
   // z-up (URDF/map) -> three y-up
   const worldRoot = new THREE.Group();
   const markerRoot = new THREE.Group();   // the CRAM debug-marker overlay (/markers)
+  // the world's own regions (/objects -> regions): areas rather than things, so they
+  // hang in their own group — nothing drags them, nothing is dropped onto them
+  const regionRoot = new THREE.Group();
   worldRoot.add(markerRoot);
+  worldRoot.add(regionRoot);
   worldRoot.rotation.x = -Math.PI / 2;
   scene3.add(worldRoot);
 
@@ -218,6 +223,7 @@ Panels.define('robot-scene', function (root, bus) {
   const models = [];              // {name, prefix, robot, obj}
   let robotModel = null;          // the bundle's own robot entry
   const objectMeshes = {};       // mesh key ('milk.stl') -> THREE.Group
+  const regionMeshes = {};       // region name -> THREE.Group
   const objectLabels = {};       // mesh key -> label sprite
   const liveSpawned = {};        // mesh key -> true for objects added by live mode
   const objectPending = {};      // mesh key -> true while its geometry is loading
@@ -235,8 +241,10 @@ Panels.define('robot-scene', function (root, bus) {
     // and would otherwise re-request the same STL dozens of times before it lands
     if (objectMeshes[spec.key] || objectPending[spec.key]) return;
     objectPending[spec.key] = true;
-    objectIdByKey[spec.key] = spec.id;
-    objectKeyById[spec.id] = spec.key;
+    if (!spec.region) {
+      objectIdByKey[spec.key] = spec.id;
+      objectKeyById[spec.id] = spec.key;
+    }
     const mat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(spec.color || '#cccccc'),
       roughness: 0.5, metalness: 0.05, envMapIntensity: 0.7,
@@ -244,12 +252,20 @@ Panels.define('robot-scene', function (root, bus) {
     function place(content) {                  // content: Mesh or Object3D
       content.traverse(function (c) {
         if (c.isMesh) {
-          c.castShadow = true; c.receiveShadow = true;
+          // a region is an overlay: it neither casts nor catches the scene's shadows
+          c.castShadow = !spec.region; c.receiveShadow = !spec.region;
           if (spec.tame && c.material && c.material.emissive) c.material.emissive.setRGB(0, 0, 0);
         }
       });
       const g = new THREE.Group();
       g.add(content);
+      if (spec.region) {
+        regionMeshes[spec.key] = g;
+        delete objectPending[spec.key];
+        regionRoot.add(g);
+        needsRender = true;
+        return;
+      }
       const box = new THREE.Box3().setFromObject(content);
       const top = isFinite(box.max.z) ? box.max.z : 0.15;
       const label = makeLabel(spec.id.replace(/_/g, ' '), spec.color);
@@ -376,6 +392,18 @@ Panels.define('robot-scene', function (root, bus) {
       _objLoader.load(spec.meshUrl, function (geom) { place(new THREE.Mesh(geom, mat)); },
         undefined, function () { box(); });
     }
+  }
+  function removeRegion(key) {
+    const g = regionMeshes[key];
+    if (!g) return;
+    regionRoot.remove(g);
+    g.traverse(function (c) {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    });
+    delete regionMeshes[key];
+    delete objectPending[key];
+    needsRender = true;
   }
   function removeObject(key) {
     const g = objectMeshes[key];
@@ -1211,8 +1239,7 @@ Panels.define('robot-scene', function (root, bus) {
   function round3(v) { return Math.round(v * 1000) / 1000; }
 
   function liveUrl() {
-    const m = /[?&]live=([\w.:-]+)/.exec(window.location.search);
-    return 'http://' + (m ? m[1] : (window.location.hostname + ':8765'));
+    return LiveMode.bridgeUrl();
   }
   function probeLive() {
     fetch(liveUrl() + '/info').then(function (r) { return r.json(); })
@@ -1444,6 +1471,15 @@ Panels.define('robot-scene', function (root, bus) {
       refreshMarkers();
     }
     let unknown = false;
+    const regionPoses = st.regions || {};
+    for (const name in regionPoses) {
+      const region = regionMeshes[name];
+      if (region) setPose(region, regionPoses[name], regionPoses[name], 0);
+      else unknown = true;                     // a region the demo added mid-run
+    }
+    for (const name in regionMeshes) {
+      if (!(name in regionPoses)) unknown = true;   // and one it dropped
+    }
     liveStateKeys = st.objects || {};
     for (const key in liveStateKeys) {
       if (key === liveDraggedKey) continue;    // the mouse owns this one right now
@@ -1479,6 +1515,7 @@ Panels.define('robot-scene', function (root, bus) {
     liveSyncing = true;
     fetch(liveUrl() + '/objects').then(function (r) { return r.json(); })
       .then(function (d) {
+        syncLiveRegions(d.regions || []);
         const live = d.objects || [];
         const liveKeys = {};
         live.forEach(function (o) {
@@ -1507,6 +1544,23 @@ Panels.define('robot-scene', function (root, bus) {
         needsRender = true;
       }).catch(function () {})
       .then(function () { liveSyncing = false; });
+  }
+
+  // the world's regions come and go as a demo computes them (a searched surface, the
+  // free places on it), so the catalog answer is the list of the ones that exist now
+  function syncLiveRegions(regions) {
+    const present = {};
+    regions.forEach(function (region) {
+      present[region.key] = 1;
+      if (regionMeshes[region.key]) return;             // already drawn — reuse
+      addObject({
+        id: region.id, key: region.key, color: region.color,
+        shapes: region.shapes, liveBase: liveUrl(), region: true,
+      });
+    });
+    for (const key in regionMeshes) {
+      if (!present[key]) removeRegion(key);
+    }
   }
 
   // watching a running demo "live" always means being on the reserved live scene,
@@ -1671,6 +1725,10 @@ Panels.define('robot-scene', function (root, bus) {
     setPropsVisible: function (on) {
       for (const n in objectMeshes) objectMeshes[n].visible = on;
       marker.visible = on && !!PLACE0;
+      needsRender = true;
+    },
+    setRegionsVisible: function (on) {
+      regionRoot.visible = on;
       needsRender = true;
     },
     highlightObjects: highlightObjects,
@@ -2075,6 +2133,7 @@ Panels.define('robot-scene', function (root, bus) {
     el.addEventListener('change', function () { RobotView[method](el.checked); });
   }
   bindLayer('lyr-objects', 'setPropsVisible');
+  bindLayer('lyr-regions', 'setRegionsVisible');
   const markersLayerEl = $('lyr-markers');
   markersLayerEl.addEventListener('change', function () {
     markerRoot.visible = markersLayerEl.checked;

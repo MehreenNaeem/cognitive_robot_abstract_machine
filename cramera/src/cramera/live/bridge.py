@@ -52,6 +52,7 @@ from semantic_digital_twin.world_description.connections import (
     ActiveConnection1DOF,
     Connection6DoF,
 )
+from semantic_digital_twin.world_description.world_entity import Region
 
 from cramera.knowledge.enums import PlanNodeGroup
 from cramera.live.markers import MarkerEntry, MarkerStore
@@ -126,6 +127,11 @@ class TaskStatusName(StrEnum):
 ROBOT_BASE_KEY = "__base__"
 """
 Key under which the robot's root body is published, instead of as a loose object.
+"""
+
+REGION_COLOR = "#39d5c8"
+"""
+Colour a region's shape falls back to when it carries none of its own.
 """
 
 
@@ -517,6 +523,11 @@ class WorldStateSnapshot:
     Loose-object pose by mesh key, in the same 7-element form as :attr:`base`.
     """
 
+    regions: Dict[str, List[float]] = field(default_factory=dict)
+    """
+    World-region pose by region name, in the same 7-element form as :attr:`base`.
+    """
+
     markers_version: int = 0
     """
     Version of the debug-marker overlay; the viewer refetches ``/markers`` on change.
@@ -663,6 +674,16 @@ class Bridge:
     _bodies: Dict[str, Body] = field(default_factory=dict)
     """
     Published bodies by mesh key; :data:`ROBOT_BASE_KEY` is the robot root.
+    """
+
+    _regions: Dict[str, Region] = field(default_factory=dict)
+    """
+    Published world regions by name (see :meth:`publish_regions`).
+    """
+
+    region_metadata: List[ObjectCatalogEntry] = field(default_factory=list)
+    """
+    Geometry catalog of the published regions: one entry per region, shape by shape.
     """
 
     _last_bind_time: float = 0.0
@@ -1035,7 +1056,37 @@ class Bridge:
         self._bodies = bodies
         self._build_object_metadata(bodies)
 
+    def publish_regions(self, regions: Dict[str, Region]) -> None:
+        """
+        Replace the published regions and rebuild their geometry catalog.
+
+        A region is an area of the world rather than a thing in it - a supporting
+        surface, the places something still fits in - so it is published apart from the
+        objects, and the viewer draws it as an overlay nothing can be dragged onto.
+
+        :param regions: The current world regions, keyed by name.
+        """
+        serve: Dict[str, str] = {}
+        catalog = [
+            self._shape_catalog_entry(
+                name, list(region.area.shapes), REGION_COLOR, serve
+            )
+            for name, region in regions.items()
+            if region.area.shapes
+        ]
+        with self._lock:
+            self._regions = regions
+            self.region_metadata = catalog
+            self._mesh_serve.update(serve)
+
     # %% what the HTTP layer reads
+    def region_catalog(self) -> List[Dict[str, Any]]:
+        """
+        The geometry catalog the viewer draws the world's regions from.
+        """
+        with self._lock:
+            return [asdict(entry) for entry in self.region_metadata]
+
     def object_catalog(self) -> List[Dict[str, Any]]:
         """
         The geometry catalog the viewer spawns live objects from.
@@ -1255,6 +1306,7 @@ class Bridge:
             for key, body in self._bodies.items():
                 bodies.setdefault(key, body)
         self.publish_bodies(bodies)
+        self.publish_regions({str(region.name): region for region in world.regions})
 
     def _discover_overlay_bodies(
         self, bodies_by_name: Dict[str, Body]
@@ -1404,6 +1456,9 @@ class Bridge:
                 base_pose = rounded_pose(body)
             else:
                 object_poses[name] = rounded_pose(body)
+        region_poses = {
+            name: rounded_pose(region) for name, region in self._regions.items()
+        }
         self._refresh_marker_state()
         transforms = self._transforms.observe(
             self._kinematic_connections, self.world, time.monotonic()
@@ -1416,6 +1471,7 @@ class Bridge:
                 frames=frames,
                 base=base_pose,
                 objects=object_poses,
+                regions=region_poses,
                 markers_version=self.marker_state["version"],
             )
 

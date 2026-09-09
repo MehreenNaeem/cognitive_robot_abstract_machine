@@ -16,6 +16,11 @@ from coraplex.robot_plans.actions.composite.transporting import TransportAction
 from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction, MoveTorsoAction
 
 from coraplex.testing import setup_world
+from llm_planner.env_planner.triplet_generator import (
+    ActionSequencePredictor,
+    OllamaLanguageModel,
+)
+from llm_planner.ollama_config import URL_OLLAMA, USER_ID_OLLAMA
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.datastructures.definitions import TorsoState
 from semantic_digital_twin.reasoning.world_reasoner import WorldReasoner
@@ -28,6 +33,8 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Wardrobe,
     Cabinet,
     Door,
+    CounterTop,
+    Sink,
 )
 from semantic_digital_twin.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -38,6 +45,8 @@ from semantic_digital_twin.world_description.geometry import Color
 from coraplex.datastructures.enums import VisualizationBackend
 from coraplex.visualization import WorldVisualization
 from cramera.live.runner import start
+
+
 
 world = setup_world()
 spoon = STLParser(
@@ -86,6 +95,7 @@ except ImportError:
     node = None
 pr2 = PR2.from_world(world)
 context = Context(world=world, robot=pr2, _debug=False, ros_node=node)
+
 '''visualization = WorldVisualization.from_environment(
     world, default_backend=VisualizationBackend.CRAMERA
 ).start()
@@ -108,8 +118,55 @@ with world.modify_world():
             handle=Handle(root=world.get_body_by_name("handle_cab10_t")),
         )
     )
+plan = sequential(
+    [
+        ParkArmsAction(Arms.BOTH),
+        MoveTorsoAction(TorsoState.HIGH),
+    ],
+    context=context,
+).plan
+#visualization.attach_plan(plan)
+
+with simulated_robot:
+    plan.perform()
+
+
 drawers = world.get_semantic_annotations_by_type(Drawer)
 doors = world.get_semantic_annotations_by_type(Door)
 cabinets = world.get_semantic_annotations_by_type(Cabinet)
 wardrobe = world.get_semantic_annotations_by_type(Wardrobe)
+Counter_top =  world.get_semantic_annotations_by_type(CounterTop)
 context.evaluate_conditions = False
+
+## Region occupancy
+from llm_planner.env_planner.utilities import unoccupied_region, add_region_to_world,visualize_bbox
+region = unoccupied_region(Counter_top[1].root,world)
+[place, *_] = region.free
+Free_pose = Pose.from_xyz_rpy(
+    place.x, place.y, place.z, yaw=1.57,
+    reference_frame=place.reference_frame,
+)
+#add_region_to_world(region,Counter_top[1].root,world)
+visualize_bbox(Counter_top[1].root,world)
+print()
+
+# TRIPLET PREDICTION
+'''from llm_planner.env_planner.triplet_grounding import TripletGrounding
+predictor = ActionSequencePredictor.from_world(
+    world=world,
+    language_model=OllamaLanguageModel(url=URL_OLLAMA, user_id=USER_ID_OLLAMA),
+    excluded_object_names=[PR2.__name__, Handle.__name__],
+)
+print("Asking LLM...")
+act_trip = predictor.predict("Put the bowl in the drawer")
+for triplet in act_trip:
+    print(
+        f"{triplet.action.__name__}: "
+        f"{triplet.source_object.__name__} -> {triplet.target_object.__name__}"
+    )
+
+act_par= TripletGrounding.required_parameters(act_trip[0].action)
+print()
+    
+'''
+

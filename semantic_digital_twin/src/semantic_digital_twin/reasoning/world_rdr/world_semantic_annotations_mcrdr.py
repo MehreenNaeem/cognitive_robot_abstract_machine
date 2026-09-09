@@ -10,6 +10,10 @@ conclusion_type = (
     Door,
     Fridge,
     Wardrobe,
+    Cabinet,
+    CounterTop,
+    Sink,
+    Table,
 )
 mutually_exclusive = False
 name = "semantic_annotations"
@@ -19,7 +23,9 @@ case_name = "World"
 
 def classify(
     case: World, **kwargs
-) -> Set[Union[Drawer, Handle, Door, Fridge, Wardrobe]]:
+) -> Set[
+    Union[Drawer, Handle, Door, Fridge, Wardrobe, Cabinet, CounterTop, Sink, Table]
+]:
     if not isinstance(case, Case):
         case = create_case(case, max_recursion_idx=3)
     conclusions = set()
@@ -51,6 +57,16 @@ def classify(
 
     if conditions_99828403881738252604561834486102211484(case):
         conclusions.update(
-            make_set(conditions_99828403881738252604561834486102211484(case))
+            make_set(conclusion_99828403881738252604561834486102211484(case))
+        )
+
+    if conditions_183994052771630485219764308570161247823(case):
+        conclusions.update(
+            make_set(conclusion_183994052771630485219764308570161247823(case))
+        )
+
+    if conditions_312057648930274185629403817560294738105(case):
+        conclusions.update(
+            make_set(conclusion_312057648930274185629403817560294738105(case))
         )
     return conclusions

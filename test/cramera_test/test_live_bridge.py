@@ -39,7 +39,7 @@ from semantic_digital_twin.world_description.geometry import (
     Sphere,
 )
 from semantic_digital_twin.world_description.shape_collection import ShapeCollection
-from semantic_digital_twin.world_description.world_entity import Body
+from semantic_digital_twin.world_description.world_entity import Body, Region
 from typing_extensions import Any, Dict, List, Optional, Tuple
 
 from cramera.knowledge.enums import PlanNodeGroup
@@ -48,9 +48,11 @@ from cramera.live.bridge import (
     ChartEdgeEntry,
     MalformedMoveRequest,
     MoveRequest,
+    ObjectKind,
     ROBOT_BASE_KEY,
     TaskStatusName,
 )
+from cramera.live.shape_catalog import ShapeKind
 
 from .test_robot_parts import ArmPart, EndEffectorPart, NamedBody, OneArmedRobot
 
@@ -946,4 +948,103 @@ class TestChartSnapshot:
             "UNKNOWN",
             "UNKNOWN",
             "TRUE",
+        ]
+
+
+# %% the world's regions
+
+
+def region_at(name: str, x: float, color: Color = None) -> Region:
+    """
+    A region carrying one box shape, at the given offset in its own frame.
+
+    :param name: The region's local name.
+    :param x: Where the box sits along x, in metres.
+    :param color: The box's colour, or None for the shape default.
+    """
+    box = Box(
+        origin=HomogeneousTransformationMatrix.from_xyz_rpy(x, 0.0, 0.0),
+        scale=Scale(0.1, 0.1, 0.1),
+    )
+    if color is not None:
+        box.color = color
+    return Region.from_shape_collection(
+        name=PrefixedName(name, prefix="world"),
+        shape_collection=ShapeCollection(shapes=[box]),
+    )
+
+
+def world_with_region(region: Region) -> World:
+    """
+    A world holding one body with the given region attached to it.
+
+    :param region: The region to attach.
+    """
+    body = shaped_body("world", "counter")
+    world = world_with(body)
+    with world.modify_world():
+        world.add_region(region)
+        world.add_connection(FixedConnection(parent=body, child=region))
+    return world
+
+
+class TestPublishedRegions:
+    """
+    A region is an area of the world rather than a thing in it, so it is published
+    apart from the loose objects the viewer lets the user drag.
+    """
+
+    def test_a_worlds_region_is_published_shape_by_shape(self):
+        bridge = Bridge()
+        bridge.attach(world_with_region(region_at("free_places", 0.2)))
+
+        [entry] = bridge.region_catalog()
+
+        assert entry["key"] == "world/free_places"
+        assert entry["kind"] == ObjectKind.SHAPES
+        assert [shape["kind"] for shape in entry["shapes"]] == [ShapeKind.BOX]
+        assert entry["shapes"][0]["position"] == [0.2, 0.0, 0.0]
+
+    def test_a_regions_own_colour_and_transparency_are_kept(self):
+        bridge = Bridge()
+        bridge.attach(
+            world_with_region(region_at("free_places", 0.0, Color(0.2, 0.8, 0.4, 0.35)))
+        )
+
+        [entry] = bridge.region_catalog()
+
+        assert entry["shapes"][0]["opacity"] == pytest.approx(0.35)
+        assert entry["shapes"][0]["color"] == "#33cc66"
+
+    def test_a_region_is_not_published_as_a_draggable_object(self):
+        bridge = Bridge()
+        bridge.attach(world_with_region(region_at("free_places", 0.0)))
+
+        assert bridge.object_keys() == []
+        assert bridge.object_catalog() == []
+
+    def test_every_regions_pose_is_snapshotted(self):
+        bridge = Bridge()
+        bridge.attach(world_with_region(region_at("free_places", 0.0)))
+
+        bridge.snapshot()
+
+        assert list(bridge.get_state()["regions"]) == ["world/free_places"]
+
+    def test_a_region_added_mid_run_shows_up_on_the_next_bind(self):
+        bridge = Bridge()
+        world = world_with(shaped_body("world", "counter"))
+        bridge.attach(world)
+        assert bridge.region_catalog() == []
+
+        with world.modify_world():
+            region = region_at("free_places", 0.0)
+            world.add_region(region)
+            world.add_connection(
+                FixedConnection(parent=world.get_body_by_name("counter"), child=region)
+            )
+        bridge.bind()
+
+        assert [entry["key"] for entry in bridge.region_catalog()] == [
+            "world/free_places"
         ]

@@ -624,7 +624,7 @@ class DoubleDoor(SemanticAnnotation):
 
 
 @dataclass(eq=False)
-class Drawer(Furniture, HasCaseAsRootBody, HasHandle, HasMechanicalJoint):
+class Drawer(Furniture, HasCaseAsRootBody, HasHandle, HasMechanicalJoint,IsStorageSpace):
     @classproperty
     def hole_direction(self) -> Vector3:
         return Vector3.Z()
@@ -693,7 +693,7 @@ class CounterTop(Furniture, HasSupportingSurface, HasSink):
 
 
 @dataclass(eq=False)
-class Cabinet(Furniture, HasCaseAsRootBody, HasDoors, HasDrawers):
+class Cabinet(Furniture, HasCaseAsRootBody, HasDoors, HasDrawers,IsStorageSpace):
     @classproperty
     def hole_direction(self) -> Vector3:
         return Vector3.NEGATIVE_X()
@@ -704,7 +704,7 @@ class Fridge(Cabinet): ...
 
 
 @dataclass(eq=False)
-class Oven(HasRootBody, HasDoors): ...
+class Oven(HasDoors, IsStorageSpace): ...
 
 
 @dataclass(eq=False)
@@ -716,7 +716,7 @@ class Cupboard(Cabinet): ...
 
 
 @dataclass(eq=False)
-class Wardrobe(Furniture, HasCaseAsRootBody, HasHandle, HasDoors, HasDrawers): ...
+class Wardrobe(Furniture, HasCaseAsRootBody, HasHandle, HasDoors, HasDrawers,IsStorageSpace): ...
 
 
 @dataclass(eq=False)
@@ -1011,7 +1011,14 @@ class Food(HasRootBody):
 
 
 @dataclass(eq=False)
-class TunaCan(Food):
+class FoodContainer(Food):
+    """
+    A food item packaged in its own container (e.g., a box, can, carton, or shaker).
+    """
+
+
+@dataclass(eq=False)
+class TunaCan(FoodContainer):
     """
     A tuna can.
     """
@@ -1033,35 +1040,35 @@ class Bread(Food):
 
 
 @dataclass(eq=False)
-class CheezeIt(Food, IsPerceivable):
+class CheezeIt(FoodContainer, IsPerceivable):
     """
     Some type of cracker.
     """
 
 
 @dataclass(eq=False)
-class Pringles(Food):
+class Pringles(FoodContainer):
     """
     Pringles chips.
     """
 
 
 @dataclass(eq=False)
-class GelatinBox(Food):
+class GelatinBox(FoodContainer):
     """
     Gelatin box.
     """
 
 
 @dataclass(eq=False)
-class TomatoSoup(Food):
+class TomatoSoup(FoodContainer):
     """
     Tomato soup.
     """
 
 
 @dataclass(eq=False)
-class Candy(Food, IsPerceivable):
+class Candy(FoodContainer, IsPerceivable):
     """
     A candy.
     """
@@ -1070,7 +1077,7 @@ class Candy(Food, IsPerceivable):
 
 
 @dataclass(eq=False)
-class Noodles(Food, IsPerceivable):
+class Noodles(FoodContainer, IsPerceivable):
     """
     A container of noodles.
     """
@@ -1079,7 +1086,7 @@ class Noodles(Food, IsPerceivable):
 
 
 @dataclass(eq=False)
-class Cereal(Food, IsPerceivable):
+class Cereal(FoodContainer, IsPerceivable):
     """
     A container of cereal.
     """
@@ -1088,7 +1095,7 @@ class Cereal(Food, IsPerceivable):
 
 
 @dataclass(eq=False)
-class Milk(Food, IsPerceivable):
+class Milk(FoodContainer, IsPerceivable):
     """
     A container of milk.
     """
@@ -1168,7 +1175,7 @@ class Orange(Fruit):
 
 
 @dataclass(eq=False)
-class Salt(Food):
+class Salt(FoodContainer):
     """
     A pack or container of salt (e.g., salt shaker or salt can).
     """

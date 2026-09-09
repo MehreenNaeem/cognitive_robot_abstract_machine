@@ -437,3 +437,4 @@ class TestMainOpensTheViewerPage:
 
     def test_no_browser_opts_out(self, monkeypatch):
         assert self.run_main(monkeypatch, ["--no-browser", "8123"]) == []
+

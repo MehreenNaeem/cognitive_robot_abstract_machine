@@ -8,6 +8,9 @@ from krrood.entity_query_language.predicate import matches_regex_fullmatch
 from semantic_digital_twin.reasoning.predicates import InsideOf
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Wardrobe,
+    CounterTop,
+    Sink,
+    Table,
     Door,
     Drawer,
     Fridge,
@@ -185,14 +188,16 @@ def conclusion_10840634078579061471470540436169882059(case) -> List[Fridge]:
 
     return get_fridges(case)
 
-def conditions_99828403881738252604561834486102211484(case) -> bool:
-        def conditions_for_world_semantic_annotations_of_type_cabinet(
-            case: World,
-        ) -> bool:
-            """Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Cabinet."""
-            return True
 
-        return conditions_for_world_semantic_annotations_of_type_cabinet(case)
+def conditions_99828403881738252604561834486102211484(case) -> bool:
+    def conditions_for_world_semantic_annotations_of_type_cabinet(
+        case: World,
+    ) -> bool:
+        """Get conditions on whether it's possible to conclude a value for World.semantic_annotations  of type Cabinet."""
+        return True
+
+    return conditions_for_world_semantic_annotations_of_type_cabinet(case)
+
 
 def conclusion_99828403881738252604561834486102211484(case) -> List[Cabinet]:
     def world_semantic_annotations_of_type_cabinet(case: World) -> List[Cabinet]:
@@ -215,3 +220,57 @@ def conclusion_99828403881738252604561834486102211484(case) -> List[Cabinet]:
         )
 
     return world_semantic_annotations_of_type_cabinet(case)
+
+
+def conditions_183994052771630485219764308570161247823(case) -> bool:
+    def conditions_for_world_semantic_annotations_of_type_countertop(
+        case: World,
+    ) -> bool:
+        """
+        Get conditions on whether it's possible to conclude a value for
+        World.semantic_annotations  of type CounterTop.
+        """
+        return True
+
+    return conditions_for_world_semantic_annotations_of_type_countertop(case)
+
+
+def conclusion_183994052771630485219764308570161247823(case) -> List[CounterTop]:
+    def world_semantic_annotations_of_type_countertop(case: World) -> List[CounterTop]:
+        """Get possible value(s) for World.semantic_annotations  of type CounterTop."""
+        fixed_connection = variable(FixedConnection, case.connections)
+        return (
+            entity(inference(CounterTop)(root=fixed_connection.child))
+            .where(
+                contains(
+                    fixed_connection.child.name.name.lower(),'countertop'
+                ),
+
+            )
+            .tolist()
+        )
+
+    return world_semantic_annotations_of_type_countertop(case)
+
+
+def conditions_312057648930274185629403817560294738105(case) -> bool:
+    def conditions_for_world_semantic_annotations_of_type_table(
+        case: World,
+    ) -> bool:
+        """
+        Get conditions on whether it's possible to conclude a value for
+        World.semantic_annotations  of type Table.
+        """
+        return True
+
+    return conditions_for_world_semantic_annotations_of_type_table(case)
+
+
+def conclusion_312057648930274185629403817560294738105(case) -> List[Table]:
+    def world_semantic_annotations_of_type_table(case: World) -> List[Table]:
+        """Get possible value(s) for World.semantic_annotations  of type Table."""
+        body = variable(Body, case.kinematic_structure_entities)
+
+        return []
+
+    return world_semantic_annotations_of_type_table(case)
