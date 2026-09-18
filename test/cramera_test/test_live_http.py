@@ -19,7 +19,11 @@ from semantic_digital_twin.world_description.geometry import Mesh
 from semantic_digital_twin.world_description.shape_collection import ShapeCollection
 from semantic_digital_twin.world_description.world_entity import Body
 
+from coraplex.datastructures.dataclasses import Context
+from coraplex.datastructures.enums import Arms
+from coraplex.plans.factories import sequential
 from coraplex.robot_plans.actions.core.pick_up import PickUpAction
+from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction
 from coraplex.robot_plans.actions.core.placing import PlaceAction
 from llm_planner.env_planner.triplet_generator import LanguageModelUnreachable
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
@@ -494,6 +498,31 @@ class TestMove:
         except urllib.error.HTTPError as error:
             status = error.code
         assert status == 404
+
+
+class TestLlmPlanEndpoint:
+    def test_an_empty_tree_is_answered_before_a_task_is_grounded(self, server):
+        assert get_json(server + "/llm_plan") == {
+            "task": "",
+            "signature": "",
+            "nodes": [],
+        }
+
+    def test_the_published_tree_is_answered(self, server, bridge):
+        context = Context(
+            world=world_with(shaped_body("world", "bowl.stl")), robot=None
+        )
+        plan = sequential([ParkArmsAction(Arms.BOTH)], context=context).plan
+
+        bridge.publish_llm_plan_step("Put the bowl away", "PickUpAction", plan)
+
+        payload = get_json(server + "/llm_plan")
+        assert payload["task"] == "Put the bowl away"
+        assert [node["label"] for node in payload["nodes"]] == [
+            "Put the bowl away",
+            "PickUpAction",
+            ParkArmsAction.__name__,
+        ]
 
 
 class TestPublishedRegions:

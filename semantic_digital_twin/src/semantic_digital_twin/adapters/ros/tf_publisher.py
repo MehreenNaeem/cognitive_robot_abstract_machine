@@ -1,10 +1,12 @@
 import logging
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from time import sleep
 from typing import Optional
 from uuid import UUID
 
+import rclpy
 from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
 from rclpy.publisher import Publisher
@@ -174,6 +176,30 @@ class TFPublisher(StateChangeCallback):
     Only published every n-th state update.
     """
 
+    republish_interval_seconds: Optional[float] = None
+    """
+    How often the tree is published again while the world's state does not change, or
+    None to publish only on state changes.
+
+    Transforms are sent on a volatile topic, so a listener keeps them only for the
+    length of its buffer: a world that goes idle drops out of a viewer's tf tree a few
+    seconds later, and anything drawn in one of its frames has nowhere left to go. A
+    world that is stepped continuously does not need this.
+    """
+
+    _republishing: Optional[threading.Thread] = field(init=False, default=None)
+    """
+    The thread republishing the tree, when :attr:`republish_interval_seconds` asks for
+    one.
+    """
+
+    _stop_republishing: threading.Event = field(
+        init=False, default_factory=threading.Event
+    )
+    """
+    Set to end :attr:`_republishing`.
+    """
+
     def __post_init__(self):
         super().__post_init__()
         self.tf_pub = self.node.create_publisher(TFMessage, self.tf_topic, 10)
@@ -185,6 +211,32 @@ class TFPublisher(StateChangeCallback):
         )
         self.tf_model_callback.notify_model_change()
         self.on_state_change()
+        if self.republish_interval_seconds is not None:
+            self.start_republishing()
+
+    def start_republishing(self) -> None:
+        """
+        Publish the tree every :attr:`republish_interval_seconds` from here on.
+
+        Runs on a thread of its own rather than on a node timer, because the world's
+        owner is under no obligation to spin the node this publisher was given.
+        """
+        if self._republishing is not None:
+            return
+        self._stop_republishing.clear()
+        self._republishing = threading.Thread(
+            target=self._republish_until_stopped, daemon=True
+        )
+        self._republishing.start()
+
+    def _republish_until_stopped(self) -> None:
+        """
+        Publish the tree at :attr:`republish_interval_seconds` until stopped.
+        """
+        while not self._stop_republishing.wait(self.republish_interval_seconds):
+            if not rclpy.ok():
+                return
+            self.on_state_change()
 
     def stop(self):
         """
@@ -193,6 +245,8 @@ class TFPublisher(StateChangeCallback):
         The model callback registers itself on the world, so stopping only the state
         callback would leave it publishing on a node that may already be gone.
         """
+        self._stop_republishing.set()
+        self._republishing = None
         self.tf_model_callback.stop()
         super().stop()
 

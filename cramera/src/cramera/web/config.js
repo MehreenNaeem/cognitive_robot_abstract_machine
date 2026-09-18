@@ -9,6 +9,6 @@
 window.CRAMERA_CONFIG = {
   layout: {
     left: ['robot-scene'],
-    right: ['eql', 'action-sequence', 'graph'],
+    right: ['llm-planner', 'graph'],
   },
 };

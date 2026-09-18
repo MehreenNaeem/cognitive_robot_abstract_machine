@@ -115,11 +115,22 @@ class VizMarkerPublisher(ModelChangeCallback):
         self.notify_model_change()
         time.sleep(0.2)
 
-    def with_tf_publisher(self):
+    def with_tf_publisher(self, republish_interval_seconds: Optional[float] = None):
         """
         Launches a tf publisher in conjunction with the VizMarkerPublisher.
+
+        :param republish_interval_seconds: How often the tf tree is published again
+            while the world's state does not change (see
+            :attr:`~semantic_digital_twin.adapters.ros.tf_publisher.TFPublisher.republish_interval_seconds`),
+            or None to publish only on state changes. A world that is not stepped
+            continuously needs this, or its frames age out of a viewer's buffer and the
+            markers drawn in them have nowhere to go.
         """
-        self._tf_publisher = TFPublisher(_world=self._world, node=self.node)
+        self._tf_publisher = TFPublisher(
+            _world=self._world,
+            node=self.node,
+            republish_interval_seconds=republish_interval_seconds,
+        )
 
     def with_collision_visualization(self, **kwargs):
         """

@@ -478,3 +478,26 @@ body.graph-full-open{overflow:hidden}
 .ms-disclosure:hover{color:var(--accent)}
 .ms-slider{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:2px 0}
 .ms-slider input[type=range]{flex:1;min-width:0}
+
+/* %% LLM planner: the task, its grounded actions and their plan steps */
+.llm-plan{overflow:auto;padding:10px 12px;flex:1 1 auto}
+.llm-row{
+  /* the panel sets --depth per row; without it a row sits at the top level */
+  --depth:0;
+  display:flex;align-items:center;gap:8px;
+  margin-left:calc(var(--depth) * 18px);
+  padding:5px 8px;border-left:2px solid var(--line2);border-radius:0 3px 3px 0;
+  background:var(--panel2)
+}
+.llm-row + .llm-row{margin-top:3px}
+.llm-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.llm-label{font-size:12.5px;font-weight:600;color:var(--ink)}
+.llm-status{margin-left:auto;font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted)}
+.llm-row.st-running{border-left-color:var(--accent2)}
+.llm-row.st-running .llm-dot{background:var(--accent2)}
+.llm-row.st-succeeded{border-left-color:var(--accent)}
+.llm-row.st-succeeded .llm-dot{background:var(--accent)}
+.llm-row.st-failed{border-left-color:var(--danger)}
+.llm-row.st-failed .llm-dot{background:var(--danger)}
+.llm-row.st-paused{border-left-color:var(--warn)}
+.llm-row.st-paused .llm-dot{background:var(--warn)}

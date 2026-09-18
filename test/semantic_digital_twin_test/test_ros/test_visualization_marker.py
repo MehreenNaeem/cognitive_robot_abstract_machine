@@ -16,6 +16,7 @@ from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
 )
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
 from semantic_digital_twin.spatial_types import HomogeneousTransformationMatrix
+from semantic_digital_twin.world import World
 from semantic_digital_twin.world_description.connections import (
     OmniDrive,
     FixedConnection,
@@ -234,3 +235,32 @@ def test_trimesh(rclpy_node):
         timeout=Duration(seconds=1.0),
         time=Time(),
     )
+
+
+# %% keeping the frames the markers are drawn in alive
+
+
+class TestTfRepublishing:
+    def test_the_tf_publisher_republishes_when_asked_to(self, rclpy_node):
+        """
+        A marker is drawn in a frame, and a frame no longer published ages out of a
+        viewer's buffer - so the interval has to reach the tf publisher this creates.
+        """
+        world = World()
+        with world.modify_world():
+            world.add_kinematic_structure_entity(Body(name=PrefixedName("root")))
+        publisher = VizMarkerPublisher(_world=world, node=rclpy_node)
+
+        publisher.with_tf_publisher(republish_interval_seconds=0.5)
+
+        assert publisher._tf_publisher.republish_interval_seconds == 0.5
+
+    def test_publishing_only_on_state_changes_stays_the_default(self, rclpy_node):
+        world = World()
+        with world.modify_world():
+            world.add_kinematic_structure_entity(Body(name=PrefixedName("root")))
+        publisher = VizMarkerPublisher(_world=world, node=rclpy_node)
+
+        publisher.with_tf_publisher()
+
+        assert publisher._tf_publisher.republish_interval_seconds is None

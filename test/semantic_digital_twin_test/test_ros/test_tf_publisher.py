@@ -1,4 +1,6 @@
+import time
 from copy import deepcopy
+from time import sleep
 
 import rclpy
 from unittest.mock import MagicMock, patch
@@ -388,3 +390,92 @@ def test_double_tf_publisher(rclpy_node, pr2_world_state_reset):
     assert tf_publisher2.tf_pub.publish.called
     published_msg = tf_publisher2.tf_pub.publish.call_args[0][0]
     assert len(published_msg.transforms) == 0
+
+
+# %% keeping an idle world's frames in a listener's buffer
+
+
+def world_with_one_connection() -> World:
+    """
+    The smallest world that has a transform to publish.
+    """
+    world = World()
+    root = Body(name=PrefixedName("root"))
+    child = Body(name=PrefixedName("child"))
+    with world.modify_world():
+        world.add_kinematic_structure_entity(root)
+        world.add_kinematic_structure_entity(child)
+        world.add_connection(FixedConnection(parent=root, child=child))
+    return world
+
+
+def wait_for(condition, timeout_seconds: float = 2.0) -> bool:
+    """
+    Wait for a condition to hold, without pinning down how long it takes.
+
+    :param condition: What has to become true.
+    :param timeout_seconds: How long to wait before giving up.
+    :return: Whether it became true in time.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        sleep(0.01)
+    return False
+
+
+class TestRepublishing:
+    """
+    Transforms travel on a volatile topic, so a listener keeps them only for the length
+    of its buffer. A world that is not being stepped therefore falls out of a viewer's
+    tf tree, taking with it anything drawn in one of its frames.
+    """
+
+    def test_an_idle_world_is_published_again_on_its_own(self, rclpy_node, monkeypatch):
+        world = world_with_one_connection()
+        publisher = TFPublisher(
+            node=rclpy_node, _world=world, republish_interval_seconds=0.02
+        )
+        published = []
+        monkeypatch.setattr(publisher.tf_pub, "publish", published.append)
+
+        try:
+            assert wait_for(lambda: len(published) >= 2)
+        finally:
+            publisher.stop()
+
+    def test_publishing_only_on_state_changes_stays_the_default(
+        self, rclpy_node, monkeypatch
+    ):
+        world = world_with_one_connection()
+        publisher = TFPublisher(node=rclpy_node, _world=world)
+        published = []
+        monkeypatch.setattr(publisher.tf_pub, "publish", published.append)
+
+        try:
+            assert not wait_for(lambda: published, timeout_seconds=0.2)
+
+            world.notify_state_change()
+
+            assert len(published) == 1
+        finally:
+            publisher.stop()
+
+    def test_stopping_the_publisher_ends_the_republishing(
+        self, rclpy_node, monkeypatch
+    ):
+        world = world_with_one_connection()
+        publisher = TFPublisher(
+            node=rclpy_node, _world=world, republish_interval_seconds=0.02
+        )
+        published = []
+        monkeypatch.setattr(publisher.tf_pub, "publish", published.append)
+        assert wait_for(lambda: published)
+
+        publisher.stop()
+        sleep(0.1)
+        after_stop = len(published)
+        sleep(0.1)
+
+        assert len(published) == after_stop

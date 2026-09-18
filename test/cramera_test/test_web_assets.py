@@ -203,6 +203,9 @@ class TestJsUnits:
     def test_action_sequence_panel(self):
         self.run_node("test_action_sequence_panel.js")
 
+    def test_llm_planner_panel(self):
+        self.run_node("test_llm_planner_panel.js")
+
     def test_model_constraints(self):
         self.run_node("test_model_constraints.js")
 

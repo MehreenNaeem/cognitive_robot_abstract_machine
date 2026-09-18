@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, StrEnum
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -55,6 +55,13 @@ from semantic_digital_twin.world_description.connections import (
 from semantic_digital_twin.world_description.world_entity import Region
 
 from cramera.knowledge.enums import PlanNodeGroup
+from cramera.live.llm_plan import (
+    GroundedStep,
+    LlmPlanNode,
+    LlmPlanSnapshot,
+    TASK_GROUP,
+    TASK_NODE_ID,
+)
 from cramera.live.markers import MarkerEntry, MarkerStore
 from cramera.live.shape_catalog import ShapeEntry, served_mesh_file, shape_entry
 from cramera.live.transforms import TransformGraph, TransformSnapshot
@@ -714,6 +721,21 @@ class Bridge:
     _plan: Optional[Plan] = None
     """
     The coraplex plan captured by the ``Plan.perform`` hook.
+    """
+
+    llm_task: str = ""
+    """
+    The task statement the language model was given (see :meth:`publish_llm_plan_step`).
+    """
+
+    llm_plan_state: LlmPlanSnapshot = field(default_factory=LlmPlanSnapshot)
+    """
+    The newest LLM-planner tree (see :meth:`snapshot_llm_plan`).
+    """
+
+    _llm_steps: List[GroundedStep] = field(default_factory=list)
+    """
+    The steps the task has been grounded into so far, in the order they were published.
     """
 
     _chart: Optional[MotionStatechart] = None
@@ -1459,6 +1481,7 @@ class Bridge:
         region_poses = {
             name: rounded_pose(region) for name, region in self._regions.items()
         }
+        self.snapshot_llm_plan()
         self._refresh_marker_state()
         transforms = self._transforms.observe(
             self._kinematic_connections, self.world, time.monotonic()
@@ -1488,6 +1511,136 @@ class Bridge:
         """
         with self._lock:
             return self.transform_state.to_payload(time.monotonic())
+
+    # %% the LLM planner's tree
+    def publish_llm_plan_step(self, task: str, label: str, plan: Plan) -> None:
+        """
+        Add one grounded step of a task to the LLM-planner tree.
+
+        A task is grounded and performed step by step, so each call appends; naming a
+        different task starts a new tree.
+
+        :param task: The task statement the language model was given.
+        :param label: Name of the action the step's triplet named.
+        :param plan: The plan that carries that step out.
+        """
+        with self._lock:
+            if task != self.llm_task:
+                self.llm_task = task
+                self._llm_steps = []
+            self._llm_steps.append(GroundedStep(label=label, plan=plan))
+        self.snapshot_llm_plan()
+
+    def snapshot_llm_plan(self) -> None:
+        """
+        Serialize the LLM-planner tree with the status every step is in.
+
+        Runs on the simulation thread, where the plans are safe to read: each step's
+        plan is walked the way :meth:`snapshot_plan` walks the executing one, so a step
+        carries the same status the plan tab shows.
+        """
+        with self._lock:
+            steps = list(self._llm_steps)
+            task = self.llm_task
+        nodes = [
+            LlmPlanNode(
+                id=TASK_NODE_ID,
+                parent=None,
+                label=task,
+                status=TaskStatusName.CREATED.value,
+                group=TASK_GROUP,
+            )
+        ]
+        order = [TASK_NODE_ID]
+        task_status = TaskStatusName.CREATED.value
+        for index, step in enumerate(steps):
+            step_id = "llm_step_%d" % index
+            step_status = self._append_step_nodes(step, step_id, nodes, order)
+            task_status = self._max_status(task_status, step_status)
+        nodes[0] = replace(nodes[0], status=self._whole_task_status(task_status, nodes))
+        with self._lock:
+            self.llm_plan_state = LlmPlanSnapshot(
+                task=task, nodes=nodes, signature="|".join(order)
+            )
+
+    def _append_step_nodes(
+        self,
+        step: GroundedStep,
+        step_id: str,
+        nodes: List[LlmPlanNode],
+        order: List[str],
+    ) -> str:
+        """
+        Append one grounded step and the actions its plan performs.
+
+        :param step: The step to serialize.
+        :param step_id: Id the step's node is published under.
+        :param nodes: Output list every node is appended to.
+        :param order: Output list every node id is appended to, for the signature.
+        :return: The status the step is in.
+        """
+        entries: List[PlanNodeEntry] = []
+        try:
+            root = step.plan.root
+        except Exception:
+            # the plan is mid-mutation and not a tree right now — next tick
+            return TaskStatusName.CREATED.value
+        step_status = self._serialize_plan_node(root, None, entries, [])
+        statuses = {entry.id: entry for entry in entries}
+        nodes.append(
+            LlmPlanNode(
+                id=step_id,
+                parent=TASK_NODE_ID,
+                label=step.label,
+                status=step_status,
+                group=PlanNodeGroup.ACTION.value,
+            )
+        )
+        order.append(step_id)
+        for action_node in step.plan.nodes:
+            if not isinstance(action_node, DescribesAnAction):
+                continue
+            entry = statuses.get("plan_node_%d" % id(action_node))
+            if entry is None:
+                continue
+            node_id = "%s_%s" % (step_id, entry.id)
+            nodes.append(
+                LlmPlanNode(
+                    id=node_id,
+                    parent=step_id,
+                    label=entry.label,
+                    status=entry.status,
+                    group=entry.group.value,
+                )
+            )
+            order.append(node_id)
+        return step_status
+
+    @staticmethod
+    def _whole_task_status(step_status: str, nodes: List[LlmPlanNode]) -> str:
+        """
+        The status of the task itself: what its steps add up to.
+
+        :param step_status: The highest-ranking status among the steps.
+        :param nodes: The nodes published so far, task first.
+        :return: The task's status; a task whose steps are only partly done reads as
+            running rather than succeeded.
+        """
+        steps = [node for node in nodes if node.parent == TASK_NODE_ID]
+        if not steps:
+            return TaskStatusName.CREATED.value
+        if step_status == TaskStatusName.SUCCEEDED.value and not all(
+            step.status == TaskStatusName.SUCCEEDED.value for step in steps
+        ):
+            return TaskStatusName.RUNNING.value
+        return step_status
+
+    def get_llm_plan(self) -> Dict[str, Any]:
+        """
+        The newest LLM-planner tree (safe to call from HTTP threads).
+        """
+        with self._lock:
+            return self.llm_plan_state.to_payload()
 
     # %% plan tree
     def _live_motion_status(self, node: PlanNode) -> Optional[str]:

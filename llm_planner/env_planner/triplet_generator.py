@@ -31,9 +31,7 @@ from llm_planner.env_reasoner.object_constraints import ObjectAffordanceReasoner
 from llm_planner.ollama_config import DEFAULT_MODEL, chat_with_model, get_response
 from krrood.utils import recursive_subclasses
 
-# Importing the module is what registers the concrete annotation classes as subclasses
-# of SemanticAnnotation, which :func:`semantic_annotation_types_by_name` reads.
-import semantic_digital_twin.semantic_annotations.semantic_annotations  # noqa: F401
+import semantic_digital_twin.semantic_annotations.semantic_annotations
 from semantic_digital_twin.world import World
 from semantic_digital_twin.world_description.world_entity import SemanticAnnotation
 
@@ -897,7 +895,7 @@ class ActionSequencePredictor:
             task=task, object_types=self.object_types, rule_source=self.rule_source
         )
 
-    def predict(self, task: str) -> list[Triplet]:
+    def predict(self, task: str,vis=False) -> list[Triplet]:
         """
         Ground a task into the sequence of triplets that carries it out.
 
@@ -908,6 +906,8 @@ class ActionSequencePredictor:
         generator = self.prompt_generator(task)
         checker = TripletResponseChecker(object_types=generator.object_types)
         prompt = generator.build_prompt()
+        if vis:
+            print(f"Prompt:\n{prompt}")
 
         failures: list[TripletResponseError] = []
         while len(failures) < self.attempts:

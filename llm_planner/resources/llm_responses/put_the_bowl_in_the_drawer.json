@@ -1,0 +1,12 @@
+[
+    {
+        "source_object": "Bowl",
+        "target_object": "Drawer",
+        "action": "PickUpAction"
+    },
+    {
+        "source_object": "Bowl",
+        "target_object": "Drawer",
+        "action": "PlaceAction"
+    }
+]

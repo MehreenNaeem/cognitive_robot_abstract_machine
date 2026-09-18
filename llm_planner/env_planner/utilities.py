@@ -36,13 +36,55 @@ Size of the volume checked at each candidate place: a ten centimetre cube, about
 mug or a bowl takes up. Pass the object's own bounding box scale for an exact answer.
 """
 
-DEFAULT_RESOLUTION = 3
-"""
-How many candidate places each horizontal axis is divided into.
 
-Every place costs one collision query against every body in the world, so the grid stays
-coarse unless a caller asks for a finer one.
+MAXIMUM_PLACES_PER_AXIS = 4
 """
+The most places an axis is divided into when a search is asked to stay within its
+allowance (see :func:`unoccupied_region`).
+"""
+
+
+@dataclass(frozen=True)
+class PlaceGrid:
+    """
+    How many candidate places a body's supporting layer is divided into, per axis.
+    """
+
+    along_x: int
+    """
+    Places along the layer's x axis.
+    """
+
+    along_y: int
+    """
+    Places along the layer's y axis.
+    """
+
+    def __post_init__(self) -> None:
+        if self.along_x < 1 or self.along_y < 1:
+            raise ValueError(f"a grid holds at least one place per axis, got {self}.")
+
+    @property
+    def place_count(self) -> int:
+        """
+        :return: How many places the grid holds, and so how many collision queries
+            searching it costs.
+        """
+        return self.along_x * self.along_y
+
+    def at_most(self, places: int) -> PlaceGrid:
+        """
+        The grid cut down to at most ``places`` per axis.
+
+        Only a grid that is larger than that on *both* axes is cut down; one that is
+        long on a single axis is left as it is.
+
+        :param places: The most places an axis may be divided into.
+        :return: The cut-down grid, or this one if it is small enough already.
+        """
+        if self.along_x > places and self.along_y > places:
+            return PlaceGrid(along_x=places, along_y=places)
+        return self
 
 
 @dataclass
@@ -102,70 +144,109 @@ def supporting_layer(body: Body, world: World, height: float) -> BoundingBox:
     )
 
 
+def place_grid_for(
+    body: Body,
+    world: World,
+    place_size: Scale = DEFAULT_PLACE_SIZE,
+) -> PlaceGrid:
+    """
+    The grid that covers as much of a body as places of the given size can.
+
+    Each axis takes as many places as fit along it whole, so the places sit edge to edge
+    with no gap between them and none of them hangs over the body. What is left over is
+    the remainder of the axis, always shorter than one place.
+
+    A body narrower than a single place still gets one place, which then hangs over its
+    edges - the smallest grid there is.
+
+    :param body: The body to put something on.
+    :param world: The world the body belongs to.
+    :param place_size: Size of the volume that has to be free at a place.
+    :return: The grid to search that body with.
+    """
+    layer = supporting_layer(body, world, place_size.z)
+    return PlaceGrid(
+        along_x=max(1, int(layer.depth / place_size.x)),
+        along_y=max(1, int(layer.width / place_size.y)),
+    )
+
+
 def unoccupied_region(
     body: Body,
     world: World,
     place_size: Scale = DEFAULT_PLACE_SIZE,
-    resolution: int = DEFAULT_RESOLUTION,
+    grid: Optional[PlaceGrid] = None,
+    maximum_allowance: bool = False,
 ) -> RegionOccupancy:
     """
     Search a body's supporting layer for the places an object still fits in.
 
-    The layer is divided into a ``resolution`` by ``resolution`` grid and every cell is
-    checked with
+    Every place of the grid is checked with
     :func:`~semantic_digital_twin.reasoning.predicates.is_place_occupied`; the body
     itself is ignored, since standing on it is the point.
 
     A closed drawer has its cabinet directly above its floor and comes back with nothing
     free; the same drawer opened comes back with the part of it that has stuck out.
 
+    ..note:: Each place costs one collision query against every body in the world, so a
+        grid that covers a large body takes a while; pass a coarser
+        :class:`PlaceGrid` to trade coverage for time.
+
     :param body: The body to put something on.
     :param world: The world the body belongs to.
     :param place_size: Size of the volume that has to be free at a place.
-    :param resolution: How many places each horizontal axis is divided into.
+    :param grid: How the layer is divided into places, or None to cover as much of the
+        body as places of that size can (see :func:`place_grid_for`).
+    :param maximum_allowance: Whether the search stays within
+        :data:`MAXIMUM_PLACES_PER_AXIS` places per axis, which keeps a large body from
+        costing hundreds of collision queries at the price of covering it more coarsely.
     :return: The free and the taken places.
-    :raises ValueError: If the resolution is not positive.
     """
-    if resolution < 1:
-        raise ValueError(f"resolution must be at least 1, got {resolution}.")
+    grid = grid or place_grid_for(body, world, place_size)
+    if maximum_allowance:
+        grid = grid.at_most(MAXIMUM_PLACES_PER_AXIS)
     layer = supporting_layer(body, world, place_size.z)
     checked_volume = _volume_at_origin(place_size, world)
 
     occupancy = RegionOccupancy()
-    for pose in _places_in(layer, resolution, world):
+    for pose in _places_in(layer, grid, world):
         taken = is_place_occupied(checked_volume, pose, world, [body])
         (occupancy.occupied if taken else occupancy.free).append(pose)
     return occupancy
 
 
-def _places_in(layer: BoundingBox, resolution: int, world: World) -> List[Pose]:
+def _places_in(layer: BoundingBox, grid: PlaceGrid, world: World) -> List[Pose]:
     """
     :param layer: The layer to divide into candidate places.
-    :param resolution: How many places each horizontal axis is divided into.
+    :param grid: How the layer is divided.
     :param world: The world the poses are expressed in.
-    :return: The centre of every cell of the grid, row by row.
+    :return: The centre of every place of the grid, row by row.
     """
     return [
         Pose.from_xyz_rpy(
-            _cell_center(layer.x_interval.lower, layer.x_interval.upper, resolution, x),
-            _cell_center(layer.y_interval.lower, layer.y_interval.upper, resolution, y),
+            _place_center(
+                layer.x_interval.lower, layer.x_interval.upper, grid.along_x, x
+            ),
+            _place_center(
+                layer.y_interval.lower, layer.y_interval.upper, grid.along_y, y
+            ),
             float(layer.z_interval.center()),
             reference_frame=world.root,
         )
-        for x in range(resolution)
-        for y in range(resolution)
+        for x in range(grid.along_x)
+        for y in range(grid.along_y)
     ]
 
 
-def _cell_center(lower: float, upper: float, resolution: int, index: int) -> float:
+def _place_center(lower: float, upper: float, places: int, index: int) -> float:
     """
     :param lower: Where the axis starts.
     :param upper: Where the axis ends.
-    :param resolution: How many cells the axis is divided into.
-    :param index: Which cell to take, counted from ``lower``.
-    :return: The middle of that cell.
+    :param places: How many places the axis is divided into.
+    :param index: Which place to take, counted from ``lower``.
+    :return: The middle of that place.
     """
-    return float(lower) + (index + 0.5) * (float(upper) - float(lower)) / resolution
+    return float(lower) + (index + 0.5) * (float(upper) - float(lower)) / places
 
 
 def _volume_at_origin(place_size: Scale, world: World) -> BoundingBox:
@@ -232,6 +313,11 @@ Colour of a place an object still fits in.
 OCCUPIED_PLACE_COLOR = Color(0.9, 0.3, 0.3, PLACE_ALPHA)
 """
 Colour of a place something already stands in.
+"""
+
+BOUNDING_BOX_COLOR = Color(0.3, 0.6, 1.0, PLACE_ALPHA)
+"""
+Colour of a body's bounding box.
 """
 
 
@@ -322,11 +408,21 @@ def _region_of_places(
         shape_collection=ShapeCollection(boxes),
     )
 
-def visualize_bbox(body: Body, world: World):
-    bounds = body.collision.as_bounding_box_collection_in_frame(body).bounding_box()
 
+def add_bounding_box_to_world(body: Body, world: World) -> Region:
+    """
+    Put a body's bounding box into the world as a region, so a viewer draws it.
+
+    The box encloses every collision shape the body has and is drawn in the body's own
+    frame, so it travels with the body.
+
+    :param body: The body whose bounding box is drawn.
+    :param world: The world to add the region to.
+    :return: The region added.
+    """
+    bounds = body.collision.as_bounding_box_collection_in_frame(body).bounding_box()
     box = bounds.as_shape()
-    box.color = Color(0.3, 0.6, 1.0, 0.3)
+    box.color = BOUNDING_BOX_COLOR
     box.origin.reference_frame = None
     region = Region.from_shape_collection(
         name=PrefixedName(f"{body.name.name}_bounding_box", body.name.prefix),
@@ -336,5 +432,4 @@ def visualize_bbox(body: Body, world: World):
         world.add_region(region)
         world.add_connection(FixedConnection(parent=body, child=region))
     world.notify_state_change()
-
-    #TODO, fix the frame, fix the region currently it shown boxes which are apart from each other
+    return region

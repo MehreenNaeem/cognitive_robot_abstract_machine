@@ -145,6 +145,18 @@ INTERACTIVE_ACTION : List[Type[ActionDescription]] = [
     PouringAction,
 ]
 
+One_OBJECT_ACTION : List[Type[ActionDescription]] = [
+    PickUpAction,
+    CloseAction,
+    OpenAction,
+    NavigateAction,
+]
+TWO_OBJECT_ACTION : List[Type[ActionDescription]] = [
+    PlaceAction,
+    CuttingAction,
+    PouringAction,
+]
+
 def get_required_parameters_name(
     action: Type[ActionDescription],
 ):

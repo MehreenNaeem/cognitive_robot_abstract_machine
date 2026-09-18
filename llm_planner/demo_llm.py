@@ -11,6 +11,9 @@ from coraplex.datastructures.grasp import GraspDescription
 
 from coraplex.execution_environment import simulated_robot
 from coraplex.plans.factories import sequential
+from coraplex.robot_plans.actions.core.pick_up import PickUpAction
+from coraplex.robot_plans.actions.core.placing import PlaceAction
+from coraplex.view_manager import ViewManager
 from coraplex.visualization import WorldVisualization
 from coraplex.robot_plans.actions.composite.transporting import TransportAction
 from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction, MoveTorsoAction
@@ -138,35 +141,53 @@ wardrobe = world.get_semantic_annotations_by_type(Wardrobe)
 Counter_top =  world.get_semantic_annotations_by_type(CounterTop)
 context.evaluate_conditions = False
 
-## Region occupancy
-from llm_planner.env_planner.utilities import unoccupied_region, add_region_to_world,visualize_bbox
-region = unoccupied_region(Counter_top[1].root,world)
-[place, *_] = region.free
-Free_pose = Pose.from_xyz_rpy(
-    place.x, place.y, place.z, yaw=1.57,
-    reference_frame=place.reference_frame,
-)
-#add_region_to_world(region,Counter_top[1].root,world)
-visualize_bbox(Counter_top[1].root,world)
-print()
 
 # TRIPLET PREDICTION
-'''from llm_planner.env_planner.triplet_grounding import TripletGrounding
+from llm_planner.env_planner.triplet_grounding import TripletGrounding,ActionArgument
+from llm_planner.env_planner.action_descriptors import plan_grounding
 predictor = ActionSequencePredictor.from_world(
     world=world,
     language_model=OllamaLanguageModel(url=URL_OLLAMA, user_id=USER_ID_OLLAMA),
     excluded_object_names=[PR2.__name__, Handle.__name__],
 )
 print("Asking LLM...")
-act_trip = predictor.predict("Put the bowl in the drawer")
+act_trip = predictor.predict("Place the milk on the Table",vis=True)
+grounding = TripletGrounding(world=world)
+print('LLM Response: ')
 for triplet in act_trip:
     print(
         f"{triplet.action.__name__}: "
         f"{triplet.source_object.__name__} -> {triplet.target_object.__name__}"
     )
+    grounded = grounding.ground(triplet)
+    print(
+        f"{grounded.action.__name__}("
+        f"object={grounded.source_object_body.name.name}, "
+        f"arm={grounded.arm.name}"
+        + (
+            ""
+            if grounded.target_object_body is None
+            else f", against={grounded.target_object_body.name.name}"
+        )
+        + ")"
+    )
+    if grounded.target_location is not None:
+        place = grounded.target_location
+        print(
+            f"    put down at ({float(place.x):.2f}, {float(place.y):.2f}, "
+            f"{float(place.z):.2f}), yaw {float(place.yaw):.2f}"
+        )
+    missing = [parameter.name for parameter in grounded.missing_parameters()]
+    if missing:
+        print(f"    the plan still needs: {', '.join(missing)}")
+    arguments = ", ".join(sorted(grounded.action_arguments()))
+    print(f"    the plan is built from: {arguments}")
+    plan_1 = plan_grounding([grounded], context)
+    with simulated_robot:
+        plan_1.perform()
 
-act_par= TripletGrounding.required_parameters(act_trip[0].action)
 print()
-    
-'''
 
+
+# TODO try to put object in drawer, put objects in cabinet,
+# reduce the computational power

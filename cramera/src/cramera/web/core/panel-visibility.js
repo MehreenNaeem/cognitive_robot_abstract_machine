@@ -22,6 +22,7 @@
     'robot-scene': 'Semantic Digital Twin Scene',
     'eql': 'EQL · entity query language',
     'action-sequence': 'Action sequence · task grounding',
+    'llm-planner': 'LLM Planner · task to plan',
     'graph': 'Knowledge & reasoning graphs',
   };
   /* What the View menu calls each panel; an unlisted id shows as its raw id. */
