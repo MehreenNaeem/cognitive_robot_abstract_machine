@@ -44,12 +44,15 @@ Panels.define('robot-scene', function (root, bus) {
     '    <label class="lp-row" title="an axis triad on every frame of the world — URDF links and loose objects (red X, green Y, blue Z)"><input type="checkbox" id="lyr-frames"><span>TF frames</span><button id="frame-gear" class="layer-gear" title="frame axis size and names">⚙</button></label>' +
     '    <div id="frame-settings" class="frame-settings hidden"></div>' +
     '    <label class="lp-row"><input type="checkbox" id="lyr-labels"><span>Object labels</span></label>' +
+    '    <label class="lp-row" title="the interaction graph of the task\'s objects: spatial relations as arrows between them; click an object for its description"><input type="checkbox" id="lyr-interaction"><span>Interaction</span></label>' +
+    '    <div id="interaction-legend" class="lp-legend hidden"></div>' +
     '    <label class="lp-row"><input type="checkbox" id="lyr-floor" checked><span>Floor shadow</span></label>' +
     '    <label class="lp-row" title="Attach to a running demo whenever one is reachable — including the next run after this one ends — instead of only once per page"><input type="checkbox" id="lyr-auto-live" checked><span>Auto-attach live</span></label>' +
     '    <div class="lp-legend" id="lp-legend"></div>' +
     '  </div>' +
     '  <div id="live-indicator" class="live-indicator">● LIVE</div>' +
     '  <div id="step-caption" class="step-caption hidden"></div>' +
+    '  <div id="interaction-card" class="interaction-card hidden"></div>' +
     '  <div class="stage-hint">drag orbit · scroll zoom · right-drag pan · drag objects &amp; the blue place target</div>' +
     '</div>' +
     '<div class="workflow">' +
@@ -208,8 +211,12 @@ Panels.define('robot-scene', function (root, bus) {
   // the world's own regions (/objects -> regions): areas rather than things, so they
   // hang in their own group — nothing drags them, nothing is dropped onto them
   const regionRoot = new THREE.Group();
+  // the interaction graph of the task's objects (/interaction), shown on demand
+  const interactionRoot = new THREE.Group();
+  interactionRoot.visible = false;
   worldRoot.add(markerRoot);
   worldRoot.add(regionRoot);
+  worldRoot.add(interactionRoot);
   worldRoot.rotation.x = -Math.PI / 2;
   scene3.add(worldRoot);
 
@@ -443,6 +450,34 @@ Panels.define('robot-scene', function (root, bus) {
     tex.anisotropy = 4;
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
     const s = 0.0016;
+    spr.scale.set(cv.width * s, cv.height * s, 1);
+    return spr;
+  }
+  // a relation caption: its text on a light frame in the relation's colour, without
+  // the dot object labels carry, drawn over the curve it names
+  function makeCaption(text, textColor, frameColor) {
+    const pad = 12, fs = 30;
+    const cv = document.createElement('canvas');
+    let ctx = cv.getContext('2d');
+    ctx.font = '700 ' + fs + 'px Inter, sans-serif';
+    cv.width = ctx.measureText(text).width + pad * 2;
+    cv.height = fs + pad * 2;
+    ctx = cv.getContext('2d');
+    ctx.font = '700 ' + fs + 'px Inter, sans-serif';
+    const r = 10, w = cv.width, h = cv.height;
+    ctx.beginPath();
+    ctx.moveTo(r, 0); ctx.arcTo(w, 0, w, h, r); ctx.arcTo(w, h, 0, h, r);
+    ctx.arcTo(0, h, 0, 0, r); ctx.arcTo(0, 0, w, 0, r); ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = frameColor; ctx.lineWidth = 4; ctx.stroke();
+    ctx.fillStyle = textColor; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, h / 2);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.anisotropy = 4;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    spr.renderOrder = 2;
+    const s = 0.0013;
     spr.scale.set(cv.width * s, cv.height * s, 1);
     return spr;
   }
@@ -1109,6 +1144,7 @@ Panels.define('robot-scene', function (root, bus) {
     if (Math.hypot(e.clientX - clickX, e.clientY - clickY) > 5) return;
     const id = classifyClick(e);
     if (id && partClickCb) partClickCb(id);
+    if (interactionRoot.visible) inspectInteraction(e);
   });
   renderer.domElement.addEventListener('pointercancel', function () { clickArmed = false; endDrag(); });
 
@@ -1319,9 +1355,13 @@ Panels.define('robot-scene', function (root, bus) {
     needsRender = true;
   }
   function clearMarkers() {
-    while (markerRoot.children.length) {
-      const child = markerRoot.children[0];
-      markerRoot.remove(child);
+    clearGroup(markerRoot);
+  }
+  // remove and dispose every child of an overlay group
+  function clearGroup(group) {
+    while (group.children.length) {
+      const child = group.children[0];
+      group.remove(child);
       child.traverse(function (c) {
         if (c.geometry) c.geometry.dispose();
         if (c.material) { c.material.map && c.material.map.dispose(); c.material.dispose(); }
@@ -1387,6 +1427,110 @@ Panels.define('robot-scene', function (root, bus) {
       holder.add(label);
     }
     return holder;
+  }
+
+  // %% the interaction graph overlay (/interaction)
+  // The task's objects by name, the spatial relations between them as curved
+  // arrows, and on clicking an object (its name or its own mesh) its description.
+  const INTERACTION_POLL_MS = 700;
+  const INTERACTION_TUBE_RADIUS = 0.006;
+  let interactionPayload = null, interactionKey = null, interactionTimer = null;
+  const interactionCardEl = $('interaction-card');
+  function refreshInteraction() {
+    if (!liveOn) return;
+    fetch(liveUrl() + '/interaction').then(function (r) { return r.json(); })
+      .then(function (payload) {
+        interactionPayload = payload;
+        const key = InteractionOverlay.drawKey(payload);
+        if (key === interactionKey) return;
+        interactionKey = key;
+        drawInteraction();
+      }).catch(function () {});
+  }
+  function drawInteraction() {
+    clearGroup(interactionRoot);
+    InteractionOverlay.markersOf(interactionPayload).forEach(function (entry) {
+      const built = entry.caption ? buildInteractionCaption(entry)
+        : entry.kind === 'line_strip' ? buildInteractionCurve(entry) : buildMarker(entry);
+      if (!built) return;
+      if (entry.node) built.traverse(function (c) { c.userData.interactionNode = entry.node; });
+      interactionRoot.add(built);
+    });
+    needsRender = true;
+  }
+  function buildInteractionCaption(entry) {
+    const caption = makeCaption(entry.text, entry.textColor, entry.color);
+    caption.position.set(entry.pose[0], entry.pose[1], entry.pose[2]);
+    return caption;
+  }
+  function buildInteractionCurve(entry) {
+    const curve = new THREE.CatmullRomCurve3(entry.points.map(function (p) {
+      return new THREE.Vector3(p[0], p[1], p[2]);
+    }));
+    return new THREE.Mesh(
+      new THREE.TubeGeometry(curve, entry.points.length * 2, INTERACTION_TUBE_RADIUS, 8, false),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(entry.color) }));
+  }
+  function clearInteraction() {
+    clearGroup(interactionRoot);
+    interactionPayload = null;
+    interactionKey = null;
+    hideInteractionCard();
+    needsRender = true;
+  }
+  function setInteractionVisible(on) {
+    interactionRoot.visible = !!on;
+    if (on && !interactionTimer) {
+      refreshInteraction();
+      interactionTimer = setInterval(refreshInteraction, INTERACTION_POLL_MS);
+    } else if (!on && interactionTimer) {
+      clearInterval(interactionTimer);
+      interactionTimer = null;
+      hideInteractionCard();
+    }
+    needsRender = true;
+  }
+  // every name a click passes through, nearest first: an object's name, a loose
+  // object's key and id, and the URDF links from the hit one up to its model root
+  function clickedNames(e) {
+    pointerNdc(e);
+    dragRay.setFromCamera(dragNdc, camera);
+    const targets = [interactionRoot];
+    for (const key in objectMeshes) if (objectMeshes[key].visible) targets.push(objectMeshes[key]);
+    models.forEach(function (m) { targets.push(m.obj); });
+    const names = [];
+    dragRay.intersectObjects(targets, true).forEach(function (hit) {
+      for (let o = hit.object; o && o !== worldRoot; o = o.parent) {
+        if (o.userData.interactionNode) names.push(o.userData.interactionNode);
+        if (o.isURDFLink && o.name) names.push(o.name);
+        for (const key in objectMeshes) {
+          if (objectMeshes[key] === o) names.push(key, objectIdByKey[key]);
+        }
+      }
+    });
+    return names;
+  }
+  function inspectInteraction(e) {
+    const node = InteractionOverlay.nodeFor(interactionPayload, clickedNames(e));
+    if (node) showInteractionCard(InteractionOverlay.cardOf(node));
+    else hideInteractionCard();
+  }
+  function showInteractionCard(card) {
+    interactionCardEl.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'ic-title';
+    title.textContent = card.title;
+    interactionCardEl.appendChild(title);
+    card.lines.forEach(function (line) {
+      const row = document.createElement('div');
+      row.className = 'ic-line';
+      row.textContent = line;
+      interactionCardEl.appendChild(row);
+    });
+    interactionCardEl.classList.remove('hidden');
+  }
+  function hideInteractionCard() {
+    interactionCardEl.classList.add('hidden');
   }
 
   // %% frame axes (the in-scene TF display)
@@ -1624,12 +1768,14 @@ Panels.define('robot-scene', function (root, bus) {
       applyMarkerTopicOverrides();
       verifyLiveBundle();
       syncLiveObjects();
+      refreshInteraction();
       liveTimer = setInterval(livePoll, 66);          // ~15 Hz render updates
     } else if (liveTimer) {
       clearInterval(liveTimer);
       liveTimer = null;
       // remove objects that only existed for the live world, restore the rest
       clearMarkers();
+      clearInteraction();
       for (const key in liveSpawned) removeObject(key);
       for (const key in objectMeshes) objectMeshes[key].visible = true;
       if (traj) applyFrame(playhead);                 // back to the recording
@@ -1731,6 +1877,7 @@ Panels.define('robot-scene', function (root, bus) {
       regionRoot.visible = on;
       needsRender = true;
     },
+    setInteractionVisible: setInteractionVisible,
     highlightObjects: highlightObjects,
     onPartClick: function (cb) { partClickCb = cb; },
     getScene: function () { return SCENE; },
@@ -2385,6 +2532,15 @@ Panels.define('robot-scene', function (root, bus) {
   applyFrameSettings(FrameAxes.settings(window.localStorage));
 
   bindLayer('lyr-labels', 'setLabelsAlways');
+  bindLayer('lyr-interaction', 'setInteractionVisible');
+  const interactionLegendEl = $('interaction-legend');
+  interactionLegendEl.innerHTML = Object.keys(InteractionOverlay.RELATION_COLORS).map(function (relation) {
+    return '<div class="li"><span class="dot" style="background:' +
+      InteractionOverlay.RELATION_COLORS[relation] + '"></span>' + relation + '</div>';
+  }).join('');
+  $('lyr-interaction').addEventListener('change', function (event) {
+    interactionLegendEl.classList.toggle('hidden', !event.target.checked);
+  });
   bindLayer('lyr-floor', 'setFloorVisible');
   const autoLiveEl = $('lyr-auto-live');
   autoLiveEl.checked = autoLiveOn();
@@ -2408,6 +2564,7 @@ Panels.define('robot-scene', function (root, bus) {
       clearInterval(probeTimer);
       clearInterval(recordingProbeTimer);
       if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+      if (interactionTimer) { clearInterval(interactionTimer); interactionTimer = null; }
       containerObserver.disconnect();
       window.removeEventListener('resize', resize);
       renderer.dispose();

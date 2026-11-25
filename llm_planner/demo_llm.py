@@ -10,7 +10,8 @@ from coraplex.datastructures.enums import (
 from coraplex.datastructures.grasp import GraspDescription
 
 from coraplex.execution_environment import simulated_robot
-from coraplex.plans.factories import sequential
+from coraplex.locations.factories import reachability_location
+from coraplex.plans.factories import sequential, execute_single
 from coraplex.robot_plans.actions.core.pick_up import PickUpAction
 from coraplex.robot_plans.actions.core.placing import PlaceAction
 from coraplex.view_manager import ViewManager
@@ -21,11 +22,22 @@ from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction, MoveTor
 from coraplex.testing import setup_world
 from llm_planner.env_planner.triplet_generator import (
     ActionSequencePredictor,
-    OllamaLanguageModel,
+    preprocessing_objects,
+    semantic_annotation_in_world,
 )
+from llm_planner.env_reasoner.LLM_utilities import OllamaLanguageModel
+from llm_planner.env_reasoner.reasoner_graphs.goal_state import GoalState
+from llm_planner.env_planner.execution_outcome import ExecutionOutcome
+from llm_planner.env_planner.executor import PlanExecutor
 from llm_planner.ollama_config import URL_OLLAMA, USER_ID_OLLAMA
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.datastructures.definitions import TorsoState
+from semantic_digital_twin.reasoning.predicates import (
+    Above,
+    InsideOf,
+    contact,
+    is_supporting,
+)
 from semantic_digital_twin.reasoning.world_reasoner import WorldReasoner
 from semantic_digital_twin.robots.pr2 import PR2
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
@@ -38,6 +50,7 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Door,
     CounterTop,
     Sink,
+    Bread,
 )
 from semantic_digital_twin.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -48,8 +61,6 @@ from semantic_digital_twin.world_description.geometry import Color
 from coraplex.datastructures.enums import VisualizationBackend
 from coraplex.visualization import WorldVisualization
 from cramera.live.runner import start
-
-
 
 world = setup_world()
 spoon = STLParser(
@@ -63,16 +74,38 @@ bowl = STLParser(
     )
 ).parse()
 
+bread = STLParser(
+    os.path.join(
+        os.path.dirname(__file__), "..", "coraplex", "resources", "objects", "bread.stl"
+    )
+).parse()
+
+
 # Distinct colors so the objects read clearly against the apartment.
 world.get_body_by_name("milk.stl").visual.shapes[0].color = Color(0.9, 0.93, 1.0)
 bowl.root.visual.shapes[0].color = Color(0.9, 0.75, 0.5)
 spoon.root.visual.shapes[0].color = Color(0.6, 0.6, 0.65)
+bread.root.visual.shapes[0].color = Color(0.396, 0.263, 0.129)
 
 with world.modify_world():
-    world.merge_world_at_pose(
+    '''world.merge_world_at_pose(
         bowl,
         HomogeneousTransformationMatrix.from_xyz_quaternion(
-            2.4, 2.2, 1, reference_frame=world.root
+            2.4, 2.2, 0.98, reference_frame=world.root
+        ),
+    )'''
+    connection_b = FixedConnection(
+        parent=world.get_body_by_name("island_countertop"),
+        child=bowl.root,
+        parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
+            -0.35, -0.04, 0.05
+        ),
+    )
+    connection_t = FixedConnection(
+        parent=world.get_body_by_name("table_area_main"),
+        child=bread.root,
+        parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
+            -0.35, -0.04, 0.75
         ),
     )
     connection = FixedConnection(
@@ -83,6 +116,8 @@ with world.modify_world():
         ),
     )
     world.merge_world(spoon, connection)
+    world.merge_world(bowl, connection_b)
+    world.merge_world(bread, connection_t)
 
 try:
     import rclpy
@@ -99,12 +134,12 @@ except ImportError:
 pr2 = PR2.from_world(world)
 context = Context(world=world, robot=pr2, _debug=False, ros_node=node)
 
-'''visualization = WorldVisualization.from_environment(
+"""visualization = WorldVisualization.from_environment(
     world, default_backend=VisualizationBackend.CRAMERA
 ).start()
 
 pr2 = PR2.from_world(world)
-context = Context(world=world, robot=pr2, _debug=False, ros_node=visualization.ros_node)'''
+context = Context(world=world, robot=pr2, _debug=False, ros_node=visualization.ros_node)"""
 
 with world.modify_world():
     world_reasoner = WorldReasoner(world)
@@ -128,7 +163,7 @@ plan = sequential(
     ],
     context=context,
 ).plan
-#visualization.attach_plan(plan)
+# visualization.attach_plan(plan)
 
 with simulated_robot:
     plan.perform()
@@ -138,54 +173,60 @@ drawers = world.get_semantic_annotations_by_type(Drawer)
 doors = world.get_semantic_annotations_by_type(Door)
 cabinets = world.get_semantic_annotations_by_type(Cabinet)
 wardrobe = world.get_semantic_annotations_by_type(Wardrobe)
-Counter_top =  world.get_semantic_annotations_by_type(CounterTop)
+Counter_top = world.get_semantic_annotations_by_type(CounterTop)
 context.evaluate_conditions = False
 
 
-# TRIPLET PREDICTION
-from llm_planner.env_planner.triplet_grounding import TripletGrounding,ActionArgument
-from llm_planner.env_planner.action_descriptors import plan_grounding
+
+task = "Place the bowl on the table"
+language_model = OllamaLanguageModel(url=URL_OLLAMA, user_id=USER_ID_OLLAMA)
+excluded_object_names = [PR2.__name__, Handle.__name__]
+
+goal_state = GoalState(
+    task=task,
+    object_types=preprocessing_objects(
+        semantic_annotation_in_world(world), excluded_object_names
+    ),
+    predicates=[InsideOf, Above, is_supporting, contact],
+    world=world,
+    language_model=language_model,
+)
+print("Asking LLM for the goal state...")
+goal = goal_state.goal()
+print(f"Goal state: {goal.to_pddl()}")
+#goal.visualize()
+
 predictor = ActionSequencePredictor.from_world(
     world=world,
-    language_model=OllamaLanguageModel(url=URL_OLLAMA, user_id=USER_ID_OLLAMA),
-    excluded_object_names=[PR2.__name__, Handle.__name__],
+    language_model=language_model,
+    excluded_object_names=excluded_object_names,
 )
 print("Asking LLM...")
-act_trip = predictor.predict("Place the milk on the Table",vis=True)
-grounding = TripletGrounding(world=world)
-print('LLM Response: ')
+act_trip = predictor.predict(task, vis=True,TS=True)
+print("LLM Response: ")
 for triplet in act_trip:
     print(
         f"{triplet.action.__name__}: "
         f"{triplet.source_object.__name__} -> {triplet.target_object.__name__}"
     )
-    grounded = grounding.ground(triplet)
-    print(
-        f"{grounded.action.__name__}("
-        f"object={grounded.source_object_body.name.name}, "
-        f"arm={grounded.arm.name}"
-        + (
-            ""
-            if grounded.target_object_body is None
-            else f", against={grounded.target_object_body.name.name}"
-        )
-        + ")"
-    )
-    if grounded.target_location is not None:
-        place = grounded.target_location
-        print(
-            f"    put down at ({float(place.x):.2f}, {float(place.y):.2f}, "
-            f"{float(place.z):.2f}), yaw {float(place.yaw):.2f}"
-        )
-    missing = [parameter.name for parameter in grounded.missing_parameters()]
-    if missing:
-        print(f"    the plan still needs: {', '.join(missing)}")
-    arguments = ", ".join(sorted(grounded.action_arguments()))
-    print(f"    the plan is built from: {arguments}")
-    plan_1 = plan_grounding([grounded], context)
-    with simulated_robot:
-        plan_1.perform()
 
+executor = PlanExecutor(
+    context=context,
+    goal_state=goal,
+    language_model=language_model,
+    visualize_graph=False,
+)
+with simulated_robot:
+    run = executor.run_triplets(act_trip)
+
+
+for execution, summary in zip(run.executions, run.summaries):
+    print(summary)
+    if execution.outcome is ExecutionOutcome.NOT_PLANNED:
+        missing = [
+            parameter.name for parameter in execution.grounded.missing_parameters()
+        ]
+        print(f"    the plan still needs: {', '.join(missing)}")
 print()
 
 

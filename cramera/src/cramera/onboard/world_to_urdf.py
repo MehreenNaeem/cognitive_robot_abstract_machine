@@ -9,12 +9,15 @@ it has no notion of the source format.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import warnings
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
 
 from coraplex.datastructures.enums import JointType
+from PIL import Image
 from scipy.spatial.transform import Rotation
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -36,9 +39,86 @@ from semantic_digital_twin.world_description.geometry import (
     Sphere,
 )
 from semantic_digital_twin.world_description.world_entity import Body
-from typing_extensions import ClassVar, Dict, Iterable, List, Optional, Type
+from trimesh.visual.material import SimpleMaterial
+from typing_extensions import ClassVar, Dict, Iterable, List, Optional, Pattern, Type
 
+from cramera.mesh_format import MeshFormat
 from cramera.onboard.bundle_urdf import BundledAssets, BundleReport
+
+
+@dataclass(frozen=True)
+class ObjTextureMaterial:
+    """
+    The texture a world draws an OBJ mesh with, as the material library the viewer
+    loads beside the bundled mesh, ``<mesh name>.mtl``.
+
+    The texture may come from outside the mesh file, e.g. from a MuJoCo material, and
+    the viewer does not follow an OBJ's own ``mtllib`` line, so the bundle states it.
+    """
+
+    MATERIAL_NAME_PATTERN: ClassVar[Pattern[str]] = re.compile(
+        r"^usemtl\s+(\S+)\s*$", re.MULTILINE
+    )
+    """
+    The line of an OBJ file that selects a material by name.
+    """
+
+    MATERIAL_LIBRARY_SUFFIX: ClassVar[str] = ".mtl"
+    """
+    Suffix of a Wavefront material library.
+    """
+
+    TEXTURE_FILE_SUFFIX: ClassVar[str] = "_texture.png"
+    """
+    What the texture file is called, after the mesh's name.
+    """
+
+    image: Image.Image
+    """
+    The texture image.
+    """
+
+    material_names: List[str]
+    """
+    The names of the materials the OBJ file selects, each drawn with :attr:`image`.
+    """
+
+    @classmethod
+    def of_shape(cls, shape: Mesh) -> Optional[ObjTextureMaterial]:
+        """
+        :param shape: A mesh shape of the world.
+        :return: The texture material of ``shape``, or None when it is no OBJ mesh,
+            is drawn without a texture or selects no material.
+        """
+        if MeshFormat.of_path(shape.filename) is not MeshFormat.OBJ:
+            return None
+        visual = shape.mesh.visual
+        if visual.kind != "texture" or not isinstance(visual.material, SimpleMaterial):
+            return None
+        if visual.material.image is None:
+            return None
+        with open(shape.filename) as mesh_file:
+            names = sorted(set(cls.MATERIAL_NAME_PATTERN.findall(mesh_file.read())))
+        if not names:
+            return None
+        return cls(image=visual.material.image, material_names=names)
+
+    def write_beside(self, bundled_mesh: str) -> None:
+        """
+        Write the texture and the material library next to a bundled mesh.
+
+        :param bundled_mesh: The path of the bundled OBJ file.
+        """
+        stem = os.path.splitext(bundled_mesh)[0]
+        texture_file = stem + self.TEXTURE_FILE_SUFFIX
+        self.image.save(texture_file)
+        library = "".join(
+            "newmtl %s\nKa 1 1 1\nKd 1 1 1\nmap_Kd %s\n\n"
+            % (name, os.path.basename(texture_file))
+            for name in self.material_names
+        )
+        with open(stem + self.MATERIAL_LIBRARY_SUFFIX, "w") as library_file:
+            library_file.write(library)
 
 
 @dataclass
@@ -84,6 +164,11 @@ class UrdfDocument:
     )
     """
     Joint types that carry a ``limit`` element when their degree of freedom is limited.
+    """
+
+    SOURCE_FOLDER_DIGEST_LENGTH: ClassVar[int] = 8
+    """
+    Number of hexadecimal digits of a mesh folder's digest in its bundled folder name.
     """
 
     output_directory: str
@@ -250,7 +335,8 @@ class UrdfDocument:
     # %% links
     def add_link(self, body: Body) -> None:
         """
-        Add a ``link`` element for a body, with one ``visual`` per shape it carries.
+        Add a ``link`` element for a body, with one ``visual`` per shape it carries
+        that is drawn: a shape without opacity is left out.
 
         :param body: The body the link describes.
         """
@@ -258,6 +344,8 @@ class UrdfDocument:
             self.root_element, "link", {"name": str(body.name)}
         )
         for shape in body.visual.shapes:
+            if shape.color.A == 0:
+                continue
             visual_element = ElementTree.SubElement(link_element, "visual")
             self._set_origin(visual_element, shape.origin)
             self._add_geometry(visual_element, shape)
@@ -297,12 +385,15 @@ class UrdfDocument:
 
         relative_path = os.path.join(
             self.mesh_subdirectory,
-            os.path.basename(os.path.dirname(shape.filename)),
+            self.bundled_folder_name(shape.filename),
             os.path.basename(shape.filename),
         )
         bundled = os.path.join(self.output_directory, "meshes", relative_path)
         if self.assets.copy(shape.filename, bundled):
             self.assets.copy_side_assets(shape.filename, bundled)
+            texture_material = ObjTextureMaterial.of_shape(shape)
+            if texture_material is not None:
+                texture_material.write_beside(bundled)
         ElementTree.SubElement(
             geometry_element,
             "mesh",
@@ -310,6 +401,24 @@ class UrdfDocument:
                 "filename": "meshes/" + relative_path.replace(os.sep, "/"),
                 "scale": self._format_numbers(shape.scale.to_np()),
             },
+        )
+
+    @classmethod
+    def bundled_folder_name(cls, mesh_file: str) -> str:
+        """
+        The folder a mesh and its side assets are bundled into: the name of the folder
+        it lies in, followed by a digest of that folder's full path, so meshes from
+        different folders of the same name, e.g. ``plate_1/visual`` and
+        ``bottle_1/visual``, never overwrite each other.
+
+        :param mesh_file: The path of the mesh file.
+        :return: The name of the bundled folder.
+        """
+        source_folder = os.path.dirname(os.path.abspath(mesh_file))
+        digest = hashlib.sha1(source_folder.encode()).hexdigest()
+        return "%s_%s" % (
+            os.path.basename(source_folder),
+            digest[: cls.SOURCE_FOLDER_DIGEST_LENGTH],
         )
 
     def _add_material(self, visual_element: ElementTree.Element, shape: Shape) -> None:

@@ -16,6 +16,7 @@ from typing_extensions import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from coraplex.plans.plan import Plan
+    from cramera.live.bridge import TaskStatusName
 
 TASK_NODE_ID = "llm_task"
 """
@@ -42,6 +43,24 @@ class GroundedStep:
     plan: Plan
     """
     The plan that carries the triplet out.
+    """
+
+
+@dataclass(frozen=True)
+class ExecutionSummaryRow:
+    """
+    What became of one performed triplet or repair action, as one line under the task.
+    """
+
+    label: str
+    """
+    The summary the execution reads as, e.g. "Open cabinet10_drawer_top with the left
+    arm: performed".
+    """
+
+    status: TaskStatusName
+    """
+    The status the row is coloured with.
     """
 
 

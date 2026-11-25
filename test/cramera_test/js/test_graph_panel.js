@@ -68,7 +68,7 @@ function makeRoot() {
     '#graph-zoom-out': makeButton(),
     '#graph-zoom-fit': makeButton(),
   };
-  const buttons = ['knowledge', 'kinematics', 'plan', 'chart', 'transforms'].map(makeButton);
+  const buttons = ['knowledge', 'kinematics', 'plan', 'chart', 'transforms', 'interaction', 'goal', 'feasibility'].map(makeButton);
   byId['#graph-tabs'] = { querySelectorAll() { return buttons; } };
   return {
     innerHTML: '',
@@ -110,12 +110,13 @@ function errorPage(status) {
 function loadPanel(responses, search) {
   let factory = null;
   let lastBuild = null;
+  let selectCallback = null;
   const requested = [];
   const Panels = { define(id, f) { factory = f; } };
   const zooms = [];
   const Graph = {
     attach() {}, build(payload) { lastBuild = payload; },
-    onSelect() {}, onDoubleSelect() {}, highlight() {}, reset() {},
+    onSelect(cb) { selectCallback = cb; }, onDoubleSelect() {}, highlight() {}, reset() {},
     setStatuses() { return false; },
     zoomBy(factor) { zooms.push(factor); }, fit() { zooms.push('fit'); },
   };
@@ -125,6 +126,7 @@ function loadPanel(responses, search) {
   return {
     factory: factory,
     lastBuild: function () { return lastBuild; },
+    select: function (id) { selectCallback(id); },
     requested: requested,
     zooms: zooms,
   };
@@ -328,6 +330,293 @@ test('a frame nothing has written yet says so instead of reporting an age', asyn
     assert.match(shelf.title, /never, since the bridge attached/);
   } finally {
     instance.destroy();
+  }
+});
+
+// %% live interaction graph
+// the bridge sends the task's objects with their descriptions and the relations between
+// them; the tab has no recorded counterpart, so it only shows something while attached
+const INTERACTION = {
+  signature: 'i1',
+  nodes: [
+    { id: 'milk.stl', label: 'milk.stl', group: 'object', lines: ['Type: Milk', 'Affordances: graspable'] },
+    { id: 'table', label: 'table', group: 'object', lines: ['Type: Table'] },
+  ],
+  edges: [{ from: 'milk.stl', to: 'table', label: 'Support' }],
+};
+
+async function showInteraction(attached) {
+  const panel = loadPanel({
+    '/api/knowledge': { ok: true, nodes: [], edges: [], details: {} },
+    'http://bridge/interaction': INTERACTION,
+  });
+  const root = makeRoot();
+  const bus = makeBus();
+  const instance = panel.factory(root, bus);
+  await flush();
+  root.buttons.find(function (b) { return b.dataset.view === 'interaction'; }).click();
+  await flush();
+  if (attached) {
+    bus.emit('live:changed', { on: true, url: 'http://bridge' });
+    await flush();
+  }
+  panel.root = root;
+  panel.bus = bus;
+  panel.instance = instance;
+  return panel;
+}
+
+test('the interaction tab asks no recorded view of the server', async function () {
+  const panel = await showInteraction(false);
+  try {
+    assert.deepStrictEqual(panel.requested, ['/api/knowledge']);
+    assert.deepStrictEqual(panel.lastBuild().nodes, []);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('every object of the interaction graph is drawn as an object node', async function () {
+  const panel = await showInteraction(true);
+  try {
+    const drawn = panel.lastBuild().nodes.map(function (n) { return [n.id, n.label, n.group]; });
+    assert.deepStrictEqual(drawn, INTERACTION.nodes.map(function (n) { return [n.id, n.label, n.group]; }));
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('every relation is drawn as a labelled arrow', async function () {
+  const panel = await showInteraction(true);
+  try {
+    const build = panel.lastBuild();
+    assert.deepStrictEqual(
+      build.edges.map(function (e) { return [e.from, e.to, e.label]; }),
+      INTERACTION.edges.map(function (e) { return [e.from, e.to, e.label]; })
+    );
+    assert.strictEqual(build.arrows, true);
+    assert.strictEqual(build.edgeLabels, true);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('clicking an object shows its description lines', async function () {
+  const panel = await showInteraction(true);
+  const selected = [];
+  panel.bus.on('entity:select', function (p) { selected.push(p); });
+  try {
+    panel.select('milk.stl');
+
+    assert.deepStrictEqual(selected[0].detail.lines, INTERACTION.nodes[0].lines);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+// %% live goal tree
+// the bridge sends the task's goal state as its AND/OR tree with all its text on the
+// nodes, and plain arrows from each connective to its operands; nothing is kept back
+// for a click
+const GOAL = {
+  signature: '(:goal (AND (OR (InsideOf spoon.stl drawer_top1) (InsideOf spoon.stl drawer_bottom1))))',
+  goal: '(:goal (AND (OR (InsideOf spoon.stl drawer_top1) (InsideOf spoon.stl drawer_bottom1))))',
+  nodes: [
+    { id: '0', label: 'AND', group: 'conjunction' },
+    { id: '1', label: 'OR', group: 'disjunction' },
+    { id: '2', label: 'spoon.stl\nInsideOf\ndrawer_top1', group: 'predicate' },
+    { id: '3', label: 'spoon.stl\nInsideOf\ndrawer_bottom1', group: 'predicate' },
+  ],
+  edges: [
+    { from: '0', to: '1' },
+    { from: '1', to: '2' },
+    { from: '1', to: '3' },
+  ],
+};
+
+async function showGoal(attached) {
+  const panel = loadPanel({
+    '/api/knowledge': { ok: true, nodes: [], edges: [], details: {} },
+    'http://bridge/goal': GOAL,
+  });
+  const root = makeRoot();
+  const bus = makeBus();
+  const instance = panel.factory(root, bus);
+  await flush();
+  root.buttons.find(function (b) { return b.dataset.view === 'goal'; }).click();
+  await flush();
+  if (attached) {
+    bus.emit('live:changed', { on: true, url: 'http://bridge' });
+    await flush();
+  }
+  panel.bus = bus;
+  panel.instance = instance;
+  return panel;
+}
+
+test('the goal tab asks no recorded view of the server', async function () {
+  const panel = await showGoal(false);
+  try {
+    assert.deepStrictEqual(panel.requested, ['/api/knowledge']);
+    assert.deepStrictEqual(panel.lastBuild().nodes, []);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('every expression of the goal is drawn with its whole caption', async function () {
+  const panel = await showGoal(true);
+  try {
+    const drawn = panel.lastBuild().nodes.map(function (n) { return [n.id, n.label, n.group]; });
+    assert.deepStrictEqual(drawn, GOAL.nodes.map(function (n) { return [n.id, n.label, n.group]; }));
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('every operand is drawn as an unlabelled arrow from its connective, as a tree', async function () {
+  const panel = await showGoal(true);
+  try {
+    const build = panel.lastBuild();
+    assert.deepStrictEqual(
+      build.edges.map(function (e) { return [e.from, e.to, e.label]; }),
+      GOAL.edges.map(function (e) { return [e.from, e.to, undefined]; })
+    );
+    assert.strictEqual(build.arrows, true);
+    assert.strictEqual(build.edgeLabels, false);
+    assert.strictEqual(build.layout, 'hier');
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('the goal tree asks for its own spacing', async function () {
+  const panel = await showGoal(true);
+  try {
+    const spacing = panel.lastBuild().spacing;
+    assert.ok(spacing.node > 0 && spacing.level > 0);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('the goal legend names every kind of node the goal draws', async function () {
+  const panel = await showGoal(true);
+  try {
+    const named = panel.lastBuild().legend.map(function (row) { return row.group; });
+    GOAL.nodes.forEach(function (n) { assert.ok(named.indexOf(n.group) >= 0, n.group); });
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('clicking an expression shows nothing more', async function () {
+  const panel = await showGoal(true);
+  const selected = [];
+  panel.bus.on('entity:select', function (p) { selected.push(p); });
+  try {
+    panel.select('2');
+
+    assert.deepStrictEqual(selected, []);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+// %% live action feasibility tree
+// the bridge sends the actions a failure repair can choose from as a tree: each action,
+// the objects it can act on, the arms that can do it and the directions each arm can
+// approach from, whose condition values are shown on click
+const FEASIBILITY = {
+  signature: 'f1',
+  nodes: [
+    { id: '0', label: 'PickUpAction', group: 'action', lines: [] },
+    { id: '1', label: 'milk.stl', group: 'object', lines: [] },
+    { id: '2', label: 'RIGHT', group: 'arm', lines: [] },
+    { id: '3', label: 'FRONT', group: 'approach_direction', lines: ['arm: RIGHT', 'grasp_description: FRONT, NoAlignment'] },
+  ],
+  edges: [
+    { from: '0', to: '1' },
+    { from: '1', to: '2' },
+    { from: '2', to: '3' },
+  ],
+};
+
+async function showFeasibility(attached) {
+  const panel = loadPanel({
+    '/api/knowledge': { ok: true, nodes: [], edges: [], details: {} },
+    'http://bridge/feasibility': FEASIBILITY,
+  });
+  const root = makeRoot();
+  const bus = makeBus();
+  const instance = panel.factory(root, bus);
+  await flush();
+  root.buttons.find(function (b) { return b.dataset.view === 'feasibility'; }).click();
+  await flush();
+  if (attached) {
+    bus.emit('live:changed', { on: true, url: 'http://bridge' });
+    await flush();
+  }
+  panel.bus = bus;
+  panel.instance = instance;
+  return panel;
+}
+
+test('the feasibility tab asks no recorded view of the server', async function () {
+  const panel = await showFeasibility(false);
+  try {
+    assert.deepStrictEqual(panel.requested, ['/api/knowledge']);
+    assert.deepStrictEqual(panel.lastBuild().nodes, []);
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('every node of the feasibility tree is drawn with its caption', async function () {
+  const panel = await showFeasibility(true);
+  try {
+    const drawn = panel.lastBuild().nodes.map(function (n) { return [n.id, n.label, n.group]; });
+    assert.deepStrictEqual(drawn, FEASIBILITY.nodes.map(function (n) { return [n.id, n.label, n.group]; }));
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('the feasibility tree is drawn top-down with an arrow to every child', async function () {
+  const panel = await showFeasibility(true);
+  try {
+    const build = panel.lastBuild();
+    assert.deepStrictEqual(
+      build.edges.map(function (e) { return [e.from, e.to]; }),
+      FEASIBILITY.edges.map(function (e) { return [e.from, e.to]; })
+    );
+    assert.strictEqual(build.arrows, true);
+    assert.strictEqual(build.layout, 'hier');
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('the feasibility legend names every kind of node the tree draws', async function () {
+  const panel = await showFeasibility(true);
+  try {
+    const named = panel.lastBuild().legend.map(function (row) { return row.group; });
+    FEASIBILITY.nodes.forEach(function (n) { assert.ok(named.indexOf(n.group) >= 0, n.group); });
+  } finally {
+    panel.instance.destroy();
+  }
+});
+
+test('clicking an approach direction shows its condition values', async function () {
+  const panel = await showFeasibility(true);
+  const selected = [];
+  panel.bus.on('entity:select', function (p) { selected.push(p); });
+  try {
+    panel.select('3');
+
+    assert.deepStrictEqual(selected[0].detail.lines, FEASIBILITY.nodes[3].lines);
+  } finally {
+    panel.instance.destroy();
   }
 });
 

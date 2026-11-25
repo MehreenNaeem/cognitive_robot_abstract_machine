@@ -13,17 +13,20 @@ from dataclasses import dataclass, field
 
 import inspect
 import json
+import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 import pytest
+import trimesh
+from PIL import Image
 from semantic_digital_twin.adapters.gazebo import GazeboParser
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.adapters.mjcf import MJCFParser
 from semantic_digital_twin.adapters.package_resolver import PackageUriResolver
 from semantic_digital_twin.adapters.urdf import URDFParser
 from semantic_digital_twin.api import BodySpecification
-from semantic_digital_twin.world_description.geometry import Box, Color, Scale
+from semantic_digital_twin.world_description.geometry import Box, Color, Mesh, Scale
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -668,6 +671,228 @@ class TestSerializeUnclaimedBodies:
 
 
 # %% loose objects of a world built in code
+class TestMeshesWithTheSameName:
+    """
+    Object datasets lay every object out alike, e.g. ``plate_1/visual/model.stl`` and
+    ``bottle_1/visual/model.stl``: meshes with the same folder and file name that are
+    different objects.
+    """
+
+    OBJECT_FOLDERS = ("plate_1", "bottle_1")
+    """
+    The folders of the two objects.
+    """
+
+    MESH_PATH = Path("visual") / "model.stl"
+    """
+    The path of each object's mesh within its folder.
+    """
+
+    @pytest.fixture()
+    def objects_world(self, tmp_path) -> World:
+        """
+        A world with one body per object, each drawn from its own mesh, the two meshes
+        of different sizes.
+        """
+        world = World()
+        floor = Body(name=PrefixedName("floor"))
+        with world.modify_world():
+            world.add_kinematic_structure_entity(floor)
+        for size, folder in enumerate(self.OBJECT_FOLDERS, start=1):
+            mesh_file = tmp_path / "objects" / folder / self.MESH_PATH
+            mesh_file.parent.mkdir(parents=True)
+            trimesh.creation.box(extents=[0.1 * size] * 3).export(str(mesh_file))
+            object_world = STLParser(str(mesh_file)).parse()
+            with object_world.modify_world():
+                object_world.root.update_name(PrefixedName(folder))
+            with world.modify_world():
+                world.merge_world(
+                    object_world,
+                    FixedConnection(parent=floor, child=object_world.root),
+                )
+        return world
+
+    def bundled_meshes(self, world: World, tmp_path) -> Dict[str, Path]:
+        """
+        :return: The bundled mesh file each object's link draws, by object folder.
+        """
+        bundle = tmp_path / "bundle"
+        report = UrdfDocument.of_bodies(
+            bodies=[world.get_body_by_name(name) for name in self.OBJECT_FOLDERS],
+            name="environment",
+            output_directory=str(bundle),
+            mesh_subdirectory="live",
+        )
+        links = ElementTree.parse(report.urdf).getroot().findall("link")
+        return {
+            link.get("name"): bundle / link.find("visual/geometry/mesh").get("filename")
+            for link in links
+            if link.get("name") in self.OBJECT_FOLDERS
+        }
+
+    def test_each_object_keeps_its_own_bundled_mesh(self, objects_world, tmp_path):
+        meshes = self.bundled_meshes(objects_world, tmp_path)
+
+        assert meshes[self.OBJECT_FOLDERS[0]] != meshes[self.OBJECT_FOLDERS[1]]
+
+    def test_each_bundled_mesh_is_a_copy_of_its_object_mesh(
+        self, objects_world, tmp_path
+    ):
+        meshes = self.bundled_meshes(objects_world, tmp_path)
+
+        for folder in self.OBJECT_FOLDERS:
+            source = tmp_path / "objects" / folder / self.MESH_PATH
+            assert meshes[folder].read_bytes() == source.read_bytes()
+
+
+class TestTexturedObjMeshes:
+    """
+    A mesh's texture can come from outside its file, e.g. from a MuJoCo material, so
+    the bundle has to carry the texture the world's mesh is drawn with.
+    """
+
+    MESH_TEXTURE_COLOR = (0, 0, 200)
+    """
+    Colour of the texture the world's mesh is drawn with.
+    """
+
+    FILE_TEXTURE_COLOR = (200, 0, 0)
+    """
+    Colour of the texture the mesh file's own material library names.
+    """
+
+    def obj_body(self, folder: Path, texture: Optional[Path]) -> World:
+        """
+        :param folder: The folder the mesh file is written to.
+        :param texture: The texture the world's mesh is drawn with, or None for none.
+        :return: A world with one body drawn from an OBJ file whose own material
+            library names a texture of :attr:`FILE_TEXTURE_COLOR`.
+        """
+        folder.mkdir(parents=True)
+        mesh = trimesh.creation.box()
+        mesh.visual = trimesh.visual.TextureVisuals(
+            uv=[[0.5, 0.5]] * len(mesh.vertices),
+            image=Image.new("RGB", (2, 2), self.FILE_TEXTURE_COLOR),
+        )
+        mesh.export(str(folder / "cup.obj"))
+        shape = (
+            Mesh(filename=str(folder / "cup.obj"))
+            if texture is None
+            else Mesh.from_file(str(folder / "cup.obj"), texture_file_path=str(texture))
+        )
+        world = World()
+        cup = Body(name=PrefixedName("cup"), visual=ShapeCollection(shapes=[shape]))
+        with world.modify_world():
+            world.add_kinematic_structure_entity(cup)
+        return world
+
+    def bundled_mesh(self, world: World, tmp_path) -> Path:
+        """
+        :return: The bundled mesh file the cup's link draws.
+        """
+        bundle = tmp_path / "bundle"
+        report = UrdfDocument.of_bodies(
+            bodies=[world.get_body_by_name("cup")],
+            name="environment",
+            output_directory=str(bundle),
+            mesh_subdirectory="live",
+        )
+        link = next(
+            link
+            for link in ElementTree.parse(report.urdf).getroot().findall("link")
+            if link.get("name") == "cup"
+        )
+        return bundle / link.find("visual/geometry/mesh").get("filename")
+
+    def texture_of_material(self, mesh_file: Path, material: str) -> Image.Image:
+        """
+        :return: The texture ``material`` names in the material library the viewer
+            loads for ``mesh_file``.
+        """
+        library = mesh_file.with_suffix(".mtl").read_text().splitlines()
+        start = library.index("newmtl " + material)
+        texture_line = next(
+            line for line in library[start + 1 :] if line.startswith("map_Kd ")
+        )
+        return Image.open(mesh_file.parent / texture_line.split(" ", 1)[1])
+
+    def test_the_mesh_texture_is_bundled_for_every_material_of_the_file(self, tmp_path):
+        texture = tmp_path / "label.png"
+        Image.new("RGB", (4, 2), self.MESH_TEXTURE_COLOR).save(texture)
+        mesh_file = self.bundled_mesh(
+            self.obj_body(tmp_path / "cup", texture), tmp_path
+        )
+
+        used = re.findall(r"^usemtl (\S+)$", mesh_file.read_text(), re.MULTILINE)
+        for material in used:
+            bundled = self.texture_of_material(mesh_file, material)
+            assert bundled.size == Image.open(texture).size
+            assert bundled.convert("RGB").getpixel((0, 0)) == self.MESH_TEXTURE_COLOR
+
+    def test_a_mesh_drawn_from_its_file_alone_keeps_the_file_texture(self, tmp_path):
+        mesh_file = self.bundled_mesh(self.obj_body(tmp_path / "cup", None), tmp_path)
+
+        used = re.findall(r"^usemtl (\S+)$", mesh_file.read_text(), re.MULTILINE)
+        for material in used:
+            bundled = self.texture_of_material(mesh_file, material)
+            assert bundled.convert("RGB").getpixel((0, 0)) == self.FILE_TEXTURE_COLOR
+
+    def test_a_mesh_without_texture_gets_no_material_library(self, tmp_path):
+        (tmp_path / "cup").mkdir()
+        trimesh.creation.box().export(str(tmp_path / "cup" / "cup.obj"))
+        world = World()
+        cup = Body(
+            name=PrefixedName("cup"),
+            visual=ShapeCollection(
+                shapes=[Mesh(filename=str(tmp_path / "cup" / "cup.obj"))]
+            ),
+        )
+        with world.modify_world():
+            world.add_kinematic_structure_entity(cup)
+
+        mesh_file = self.bundled_mesh(world, tmp_path)
+
+        assert not mesh_file.with_suffix(".mtl").exists()
+
+
+class TestInvisibleShapes:
+    """
+    A model can mark shapes as not drawn by giving them no opacity, e.g. the collision
+    pieces a MuJoCo object model lists among its geometry.
+    """
+
+    def test_a_shape_without_opacity_is_not_drawn(self, tmp_path):
+        world = World()
+        cup = Body(
+            name=PrefixedName("cup"),
+            visual=ShapeCollection(
+                shapes=[
+                    Box(scale=Scale(0.1, 0.1, 0.1), color=Color(0.2, 0.4, 0.6, 1.0)),
+                    Box(scale=Scale(0.3, 0.3, 0.3), color=Color(0.8, 0.8, 0.8, 0.0)),
+                ]
+            ),
+        )
+        with world.modify_world():
+            world.add_kinematic_structure_entity(cup)
+
+        report = UrdfDocument.of_bodies(
+            bodies=[cup],
+            name="environment",
+            output_directory=str(tmp_path / "bundle"),
+            mesh_subdirectory="live",
+        )
+
+        link = next(
+            link
+            for link in ElementTree.parse(report.urdf).getroot().findall("link")
+            if link.get("name") == "cup"
+        )
+        assert [
+            visual.find("geometry/box").get("size")
+            for visual in link.findall("visual")
+        ] == [UrdfDocument._format_numbers([0.1, 0.1, 0.1])]
+
+
 class TestFreeFloatingObjects:
     """
     A world built in code loads no mesh file and spawns no box, so nothing tells the

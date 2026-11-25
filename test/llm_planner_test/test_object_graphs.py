@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from llm_planner.env_reasoner.object_graphs import (
+from llm_planner.env_reasoner.reasoner_graphs.object_graphs import (
     AnnotationOrigin,
+    BodyWithoutSemanticAnnotation,
     UnknownSemanticAnnotation,
+    get_semantic_annotation_of_body,
     semantic_annotation_graph,
     semantic_annotation_type_by_name,
     visualize_semantic_annotation_graph,
@@ -14,6 +16,7 @@ from semantic_digital_twin.semantic_annotations.mixins import HasDoors, IsPercei
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Cabinet,
     Cereal,
+    Drawer,
     Fridge,
     Food,
     FoodContainer,
@@ -283,4 +286,49 @@ class TestVisualizeSemanticAnnotationGraphForName:
         with pytest.raises(UnknownSemanticAnnotation):
             visualize_semantic_annotation_graph_for_name(
                 "NotAnAnnotation", tmp_path / "graph.html", open_in_browser=False
+            )
+
+
+# %% get_semantic_annotation_of_body
+
+MILK_BODY_NAME = "milk.stl"
+"""
+The apartment body the milk annotation is rooted at.
+"""
+
+DRAWER_BODY_NAME = "cabinet10_drawer_top"
+"""
+The apartment body a drawer annotation is rooted at.
+"""
+
+
+class TestSemanticAnnotationOfBody:
+    def test_a_body_belongs_to_the_annotation_rooted_at_it(
+        self, apartment_world_copy
+    ) -> None:
+        annotation = get_semantic_annotation_of_body(
+            MILK_BODY_NAME, apartment_world_copy
+        )
+
+        assert annotation is apartment_world_copy.get_semantic_annotations_by_type(
+            Milk
+        )[0]
+
+    def test_the_annotation_found_is_rooted_at_the_named_body(
+        self, apartment_world_copy
+    ) -> None:
+        annotation = get_semantic_annotation_of_body(
+            DRAWER_BODY_NAME, apartment_world_copy
+        )
+
+        assert annotation.root is apartment_world_copy.get_body_by_name(
+            DRAWER_BODY_NAME
+        )
+
+    def test_a_body_no_annotation_is_rooted_at_raises(
+        self, apartment_world_copy
+    ) -> None:
+        with pytest.raises(BodyWithoutSemanticAnnotation):
+            get_semantic_annotation_of_body(
+                apartment_world_copy.root.name.name, apartment_world_copy
             )

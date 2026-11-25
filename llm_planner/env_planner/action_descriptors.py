@@ -16,8 +16,7 @@ from krrood.entity_query_language.factories import a, variable
 from semantic_digital_twin.spatial_types import Pose
 from coraplex.datastructures.enums import Arms
 from coraplex.locations.factories import reachability_location
-from coraplex.plans.factories import sequential
-from coraplex.plans.plan import Plan
+from coraplex.plans.plan_node import ActionLike
 from coraplex.robot_plans.actions.base import ActionDescription
 from llm_planner.env_planner.triplet_grounding import ActionArgument, GroundedTriplet
 from semantic_digital_twin.world import World
@@ -45,20 +44,12 @@ def goto_location(location: Union[Pose, Body], context: Context, arm: Arms):
     return [
         ParkArmsAction(Arms.BOTH),
         MoveTorsoAction(TorsoState.HIGH),
-        # Tries to find a pick-up position for the robot that uses the given arm
-        a(NavigateAction)(
-            target_location=variable(
-                Pose,
-                domain=DeferredLocation(
-                    lambda: reachability_location(
-                        location,
-                        context,
-                        arm,
-                    )
-                ),
-            ),
-            keep_joint_states=True,
-        ),
+        # Tries to find a standing position for the robot that is reachable by arm
+        NavigateAction(next(iter(reachability_location(location, context=context, arm=Arms.LEFT)
+                                 )
+                            )
+                       ),
+
     ]
 
 
@@ -137,9 +128,11 @@ def _handle_below(body: Body, world: World) -> Optional[Handle]:
     return None
 
 
-def plan_grounding(grounded_triplets: List[GroundedTriplet], context: Context) -> Plan:
+def plan_grounding(
+    grounded_triplets: List[GroundedTriplet], context: Context
+) -> List[ActionLike]:
     """
-    The plan that carries out a grounded sequence.
+    The steps that carry out a grounded sequence, in execution order.
 
     Every triplet contributes the navigation that brings the robot within reach of what
     it acts on, followed by the action itself. A triplet whose action cannot be built -
@@ -150,8 +143,8 @@ def plan_grounding(grounded_triplets: List[GroundedTriplet], context: Context) -
     :param grounded_triplets: The sequence to perform, as
         :meth:`~llm_planner.env_planner.triplet_grounding.TripletGrounding.ground`
         resolves each triplet.
-    :param context: The context the plan is performed in, holding the world and robot.
-    :return: The plan to perform.
+    :param context: The context the steps are built for, holding the world and robot.
+    :return: The steps to perform, ready to be composed into a plan.
     """
     children = []
     for grounded_triplet in grounded_triplets:
@@ -162,7 +155,7 @@ def plan_grounding(grounded_triplets: List[GroundedTriplet], context: Context) -
             action_designator_plan(grounded_triplet, context, grounded_triplet.arm)
         )
         children.append(action)
-    return sequential(children, context=context).plan
+    return children
 
 
 def action_designator(

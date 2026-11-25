@@ -302,3 +302,86 @@ test('statechart transition kinds get distinct edge styles', function () {
   assert.strictEqual(edges[0].color.color, '#4bd38a');               // START: green
   assert.ok(Array.isArray(edges[1].dashes));                         // PAUSE: dashed
 });
+
+// %% edge captions
+function relationFixture(Graph, edgeLabels) {
+  Graph.build({
+    key: 'interaction', arrows: true, edgeLabels: edgeLabels,
+    nodes: [
+      { id: 'milk', label: 'milk', group: 'object' },
+      { id: 'table', label: 'table', group: 'object' },
+    ],
+    edges: [
+      { from: 'milk', to: 'table', kind: 'relation', label: 'Support' },
+      { from: 'milk', to: 'table', kind: 'relation', label: 'Contact' },
+      { from: 'table', to: 'milk', kind: 'relation', label: 'Near' },
+    ],
+  });
+  return Object.values(lastData.edges.items);
+}
+
+test('a view that asks for edge labels writes each relation on its edge', function () {
+  const edges = relationFixture(loadGraphJs(), true);
+  assert.deepStrictEqual(edges.map((e) => e.label), ['Support', 'Contact', 'Near']);
+});
+
+test('edges between the same two nodes are curved apart so their labels do not overlap', function () {
+  const edges = relationFixture(loadGraphJs(), true);
+  const roundness = edges.map((e) => e.smooth.roundness);
+  assert.strictEqual(new Set(roundness).size, roundness.length);
+});
+
+test('other views keep plain edges with the relation only as a tooltip', function () {
+  const edges = relationFixture(loadGraphJs(), false);
+  assert.deepStrictEqual(edges.map((e) => e.label), [undefined, undefined, undefined]);
+  assert.deepStrictEqual(edges.map((e) => e.title), ['Support', 'Contact', 'Near']);
+});
+
+// %% goal tree
+// the goal tab writes a connective inside a circle and a predicate inside a box, and asks
+// for a wider tree than the default
+function goalFixture(Graph, spacing) {
+  Graph.build({
+    key: 'goal',
+    layout: 'hier',
+    arrows: true,
+    spacing: spacing,
+    nodes: [
+      { id: '0', label: 'AND', group: 'conjunction' },
+      { id: '1', label: 'spoon.stl\nInsideOf\ndrawer_top1', group: 'predicate' },
+    ],
+    edges: [{ from: '0', to: '1' }],
+  });
+}
+
+test('connectives are drawn as circles and predicates as boxes, text inside', function () {
+  const Graph = loadGraphJs();
+  goalFixture(Graph);
+  assert.strictEqual(lastOptions.groups.conjunction.shape, 'circle');
+  assert.strictEqual(lastOptions.groups.disjunction.shape, 'circle');
+  assert.strictEqual(lastOptions.groups.predicate.shape, 'box');
+  assert.strictEqual(lastOptions.groups.object.shape, 'dot');
+});
+
+test('text inside a circle or a box is written without the outline a dot label needs', function () {
+  const Graph = loadGraphJs();
+  goalFixture(Graph);
+  ['conjunction', 'disjunction', 'predicate'].forEach(function (group) {
+    assert.strictEqual(lastOptions.groups[group].font.strokeWidth, 0, group);
+  });
+  assert.strictEqual(lastOptions.groups.object.font.strokeWidth, 3);
+});
+
+test('a tree view may set its own spacing', function () {
+  const Graph = loadGraphJs();
+  goalFixture(Graph, { node: 260, level: 180 });
+  assert.strictEqual(lastOptions.layout.hierarchical.nodeSpacing, 260);
+  assert.strictEqual(lastOptions.layout.hierarchical.levelSeparation, 180);
+});
+
+test('a tree view without its own spacing keeps the default', function () {
+  const Graph = loadGraphJs();
+  goalFixture(Graph);
+  assert.strictEqual(lastOptions.layout.hierarchical.nodeSpacing, 130);
+  assert.strictEqual(lastOptions.layout.hierarchical.levelSeparation, 110);
+});

@@ -19,10 +19,9 @@ from typing_extensions import Any, Dict, List
 
 from llm_planner.env_planner.triplet_generator import (
     ActionSequencePredictor,
-    LanguageModel,
-    OllamaLanguageModel,
     Triplet,
 )
+from llm_planner.env_reasoner.LLM_utilities import LanguageModel, OllamaLanguageModel
 from llm_planner.ollama_config import DEFAULT_MODEL, URL_OLLAMA, USER_ID_OLLAMA
 from semantic_digital_twin.world_description.world_entity import SemanticAnnotation
 

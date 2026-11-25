@@ -180,6 +180,57 @@ def test_has_hinge_has_slider_aggregate_bodies():
     assert set(drawer.kinematic_structure_entities) == expected_drawer_bodies
 
 
+# %% aggregating bodies leaves the world as it was found
+
+
+@pytest.fixture
+def drawer_on_a_slider():
+    """
+    A drawer whose mechanical joint is a slider, both hanging off the world root.
+    """
+    world = World()
+    root = Body(name=PrefixedName("root"))
+    with world.modify_world():
+        world.add_kinematic_structure_entity(root)
+
+    drawer_body = Body(name=PrefixedName("drawer_body"))
+    slider_body = Body(name=PrefixedName("slider_body"))
+    drawer = Drawer(root=drawer_body)
+    slider = Slider(root=slider_body)
+    with world.modify_world():
+        world.add_connection(FixedConnection(parent=root, child=drawer_body))
+        world.add_connection(FixedConnection(parent=root, child=slider_body))
+        world.add_semantic_annotation(drawer)
+        world.add_semantic_annotation(slider)
+        drawer.add(slider)
+    return world, drawer
+
+
+def test_aggregating_bodies_twice_reports_the_same_bodies(drawer_on_a_slider):
+    """
+    The branch below the annotation's root is cached and handed to its readers by
+    reference, so a reader that adds the mechanical joint to it adds the joint for
+    every later reader too.
+    """
+    _, drawer = drawer_on_a_slider
+    first_read = list(drawer.kinematic_structure_entities)
+
+    assert list(drawer.kinematic_structure_entities) == first_read
+    assert first_read == [drawer.root, drawer.mechanical_joint.root]
+
+
+def test_aggregating_bodies_leaves_the_branch_query_unchanged(drawer_on_a_slider):
+    world, drawer = drawer_on_a_slider
+    branch_before = list(world.get_kinematic_structure_entities_of_branch(drawer.root))
+
+    drawer.kinematic_structure_entities
+
+    assert (
+        list(world.get_kinematic_structure_entities_of_branch(drawer.root))
+        == branch_before
+    )
+
+
 def test_semantic_annotation_hash(apartment_world_copy):
     semantic_annotation1 = Handle(root=apartment_world_copy.bodies[0])
     semantic_annotation2 = Handle(root=apartment_world_copy.bodies[0])

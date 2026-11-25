@@ -56,6 +56,16 @@
     monitor:     { color: '#4bd38a', ring: '#a6ecc6', size: 14, label: 'Monitor / observation' },
     motion_goal: { color: '#5b8cff', ring: '#a9c2ff', size: 15, label: 'Goal (contains nodes)' },
     motion_end:  { color: '#b98cff', ring: '#d9c2ff', size: 16, label: 'End / cancel motion' },
+
+    // %% goal-tree nodes, bucketed by the kind of goal expression
+    // the connective is written inside a circle, the predicate and its bodies inside a box
+    conjunction: { color: '#ffb648', ring: '#ffd89a', size: 18, label: 'AND', shape: 'circle' },
+    disjunction: { color: '#5b8cff', ring: '#a9c2ff', size: 16, label: 'OR', shape: 'circle' },
+    predicate:   { color: '#4bd38a', ring: '#a6ecc6', size: 14, label: 'Predicate', shape: 'box' },
+
+    // %% action-feasibility-tree nodes (actions and objects reuse the groups above)
+    arm:                { color: '#4bd38a', ring: '#a6ecc6', size: 14, label: 'Arm' },
+    approach_direction: { color: '#ffb648', ring: '#ffd89a', size: 13, label: 'Approach direction' },
   };
 
   // %% execution status → node ring
@@ -105,6 +115,9 @@
     return patch;
   }
 
+  // how much further each extra labelled edge between the same two nodes is curved
+  const EDGE_LABEL_ROUNDNESS_STEP = 0.3;
+
   const EDGE_STYLE = {
     // motion-statechart transitions (giskardpy TransitionKind)
     START:   { c: '#4bd38a', o: 0.75, w: 1.8 },
@@ -120,6 +133,7 @@
     fixed:       { c: '#3a4c6e', o: 0.5,  w: 1.2, d: [3, 3] },
     actuated:    { c: '#ffb648', o: 0.65, w: 1.8 },
     free:        { c: '#39d5c8', o: 0.6,  w: 1.6 },
+    relation:    { c: '#8c9bbd', o: 0.8,  w: 1.6 },   // spatial relation between objects
     default:     { c: '#3a4c6e', o: 0.4,  w: 1 },
   };
 
@@ -167,15 +181,25 @@
     const rawEdges = data.edges.filter(function (e) {
       const k = e.from + '>' + e.to + '>' + (e.label || ''); if (seen[k]) return false; seen[k] = 1; return true;
     });
-    // plain lines: no edge labels, no arrowheads — the relation name only shows
-    // as a hover tooltip, and in the answer panel when a node is clicked
+    // plain lines by default: the relation name only shows as a hover tooltip, and in
+    // the answer panel when a node is clicked. A view with edgeLabels writes it on the
+    // edge instead, curving edges between the same two nodes apart so labels stay legible.
+    const edgesPerPair = {};
     const visEdges = rawEdges.map(function (e) {
       const s = EDGE_STYLE[e.kind] || EDGE_STYLE.default;
-      return {
+      const edge = {
         from: e.from, to: e.to,
         title: e.label || undefined,
         color: { color: s.c, opacity: s.o }, width: s.w, dashes: s.d || false,
       };
+      if (!data.edgeLabels) return edge;
+      const pair = [e.from, e.to].sort().join('>');
+      const position = edgesPerPair[pair] || 0;
+      edgesPerPair[pair] = position + 1;
+      edge.label = e.label;
+      edge.font = { color: '#dfe8fb', size: 12, align: 'middle', strokeWidth: 3, strokeColor: '#0b1220' };
+      edge.smooth = { enabled: true, type: 'curvedCW', roundness: position * EDGE_LABEL_ROUNDNESS_STEP };
+      return edge;
     });
 
     nodes = new vis.DataSet(visNodes);
@@ -190,22 +214,29 @@
     const groups = {};
     Object.keys(GROUP_STYLE).forEach(function (g) {
       const st = GROUP_STYLE[g];
+      const textInside = st.shape === 'box' || st.shape === 'circle';
       groups[g] = {
-        shape: 'dot',
+        shape: st.shape || 'dot',
         color: { background: st.color, border: st.ring, highlight: { background: st.ring, border: '#fff' } },
-        font: { color: '#dfe8fb', size: hasStatus ? 17 : 13, face: 'Inter',
-                strokeWidth: 3, strokeColor: '#0b1220' },
+        // text inside a shape reads dark on its fill; text under a dot keeps the outline
+        font: textInside
+          ? { color: '#0b1220', size: 13, face: 'Inter', strokeWidth: 0 }
+          : { color: '#dfe8fb', size: hasStatus ? 17 : 13, face: 'Inter',
+              strokeWidth: 3, strokeColor: '#0b1220' },
         borderWidth: 2,
       };
     });
 
     // trees (plan / statechart) read far better laid out top-down (or
     // left-to-right) than as a force hairball
+    // a view may ask for its own spacing, e.g. for boxes of several lines of text
+    const spacing = data.spacing || {};
     const layout = hier
       ? { hierarchical: { enabled: true, direction: data.layout === 'hier-lr' ? 'LR' : 'UD',
                           sortMethod: 'directed',
-                          levelSeparation: data.layout === 'hier-lr' ? 190 : (hasStatus ? 195 : 110),
-                          nodeSpacing: hasStatus ? 250 : 130,
+                          levelSeparation: spacing.level ||
+                            (data.layout === 'hier-lr' ? 190 : (hasStatus ? 195 : 110)),
+                          nodeSpacing: spacing.node || (hasStatus ? 250 : 130),
                           treeSpacing: hasStatus ? 280 : 160, shakeTowards: 'roots' } }
       : { improvedLayout: !bigGraph };   // improvedLayout pre-solve is expensive
 

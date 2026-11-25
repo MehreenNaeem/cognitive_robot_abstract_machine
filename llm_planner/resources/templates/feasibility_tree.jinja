@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; font-family: sans-serif; }
+  #network { height: 100vh; background: #000000; }
+</style>
+</head>
+<body>
+<div id="network"></div>
+<script>
+const layoutOptions = {{ layout_options_json | safe }};
+const COLLAPSED_MARK = "▸ ";
+const EXPANDED_MARK = "▾ ";
+const nodes = new vis.DataSet([]);
+const edges = new vis.DataSet([]);
+const network = new vis.Network(
+  document.getElementById("network"),
+  { nodes: nodes, edges: edges },
+  Object.assign(
+    {
+      nodes: { shape: "box", font: { color: "#000000", align: "left" } },
+      edges: { color: "#888888", arrows: "to" },
+      interaction: { selectable: false },
+    },
+    layoutOptions
+  )
+);
+
+let treeNodes = new Map();
+let treeEdges = [];
+let parentOf = new Map();
+let childrenOf = new Map();
+const expanded = new Set();
+
+function isShown(id) {
+  for (let parent = parentOf.get(id); parent !== undefined; parent = parentOf.get(parent)) {
+    if (!expanded.has(parent)) { return false; }
+  }
+  return true;
+}
+
+function shownLabel(node) {
+  if (!childrenOf.has(node.id)) { return node.label; }
+  return (expanded.has(node.id) ? EXPANDED_MARK : COLLAPSED_MARK) + node.label;
+}
+
+function redraw() {
+  const shownNodes = [...treeNodes.values()]
+    .filter((node) => isShown(node.id))
+    .map((node) => Object.assign({}, node, { label: shownLabel(node) }));
+  const shownNodeIds = new Set(shownNodes.map((node) => node.id));
+  const shownEdges = treeEdges.filter((edge) => shownNodeIds.has(edge.to));
+  const shownEdgeIds = new Set(shownEdges.map((edge) => edge.id));
+
+  nodes.getIds().forEach((id) => { if (!shownNodeIds.has(id)) { nodes.remove(id); } });
+  edges.getIds().forEach((id) => { if (!shownEdgeIds.has(id)) { edges.remove(id); } });
+  nodes.update(shownNodes);
+  edges.update(shownEdges);
+  network.fit({ animation: false });
+}
+
+function toggle(id) {
+  if (!childrenOf.has(id)) { return; }
+  if (expanded.has(id)) { expanded.delete(id); } else { expanded.add(id); }
+  redraw();
+}
+
+network.on("click", (event) => {
+  const id = network.getNodeAt(event.pointer.DOM);
+  if (id !== undefined) { toggle(id); }
+});
+
+async function refresh() {
+  const response = await fetch("graph");
+  const payload = await response.json();
+  const signature = JSON.stringify(payload);
+  if (signature === refresh.signature) { return; }
+  refresh.signature = signature;
+
+  treeNodes = new Map(payload.nodes.map((node) => [node.id, node]));
+  treeEdges = payload.edges;
+  parentOf = new Map(treeEdges.map((edge) => [edge.to, edge.from]));
+  childrenOf = new Map();
+  treeEdges.forEach((edge) => {
+    if (!childrenOf.has(edge.from)) { childrenOf.set(edge.from, []); }
+    childrenOf.get(edge.from).push(edge.to);
+  });
+  redraw();
+}
+
+refresh();
+setInterval(refresh, {{ interval_ms }});
+</script>
+</body>
+</html>

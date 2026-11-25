@@ -16,7 +16,7 @@ from semantic_digital_twin.datastructures.definitions import TorsoState
 
 from cramera.knowledge.enums import PlanNodeGroup
 from cramera.live.bridge import Bridge, TaskStatusName
-from cramera.live.llm_plan import TASK_GROUP, TASK_NODE_ID
+from cramera.live.llm_plan import TASK_GROUP, TASK_NODE_ID, ExecutionSummaryRow
 
 from .test_live_bridge import shaped_body, world_with
 
@@ -115,7 +115,9 @@ class TestPublishedTree:
         bridge = Bridge()
         bridge.publish_llm_plan_step(TASK, "OpenAction", two_step_plan(context))
 
-        bridge.publish_llm_plan_step("Open the cabinet", "OpenAction", two_step_plan(context))
+        bridge.publish_llm_plan_step(
+            "Open the cabinet", "OpenAction", two_step_plan(context)
+        )
 
         assert bridge.get_llm_plan()["task"] == "Open the cabinet"
         assert labels_under(bridge, TASK_NODE_ID) == ["OpenAction"]
@@ -170,9 +172,7 @@ class TestPublishedStatus:
 
         published = nodes_by_id(bridge)
         step_id = [
-            node["id"]
-            for node in published.values()
-            if node["parent"] == TASK_NODE_ID
+            node["id"] for node in published.values() if node["parent"] == TASK_NODE_ID
         ][0]
         assert published[f"{step_id}_plan_node_{id(park_arms)}"]["status"] == (
             TaskStatusName.RUNNING
@@ -213,3 +213,101 @@ class TestPublishedStatus:
         bridge.snapshot_llm_plan()
 
         assert nodes_by_id(bridge)[TASK_NODE_ID]["status"] == TaskStatusName.SUCCEEDED
+
+
+# %% the execution summaries of a run
+
+
+PERFORMED_ROW = ExecutionSummaryRow(
+    label="Open cabinet10_drawer_top with the left arm: performed",
+    status=TaskStatusName.SUCCEEDED,
+)
+"""
+The summary of an action that was performed.
+"""
+
+FAILED_ROW = ExecutionSummaryRow(
+    label="Pick up bowl.stl with the left arm: condition failed",
+    status=TaskStatusName.FAILED,
+)
+"""
+The summary of an action whose condition failed.
+"""
+
+
+def statuses_under(bridge: Bridge, parent: str) -> list:
+    return [
+        node["status"]
+        for node in bridge.get_llm_plan()["nodes"]
+        if node["parent"] == parent
+    ]
+
+
+class TestExecutionSummaries:
+    def test_the_summaries_hang_off_the_task_in_order(self):
+        bridge = Bridge()
+
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW, FAILED_ROW])
+
+        assert labels_under(bridge, TASK_NODE_ID) == [
+            PERFORMED_ROW.label,
+            FAILED_ROW.label,
+        ]
+
+    def test_each_summary_carries_its_status(self):
+        bridge = Bridge()
+
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW, FAILED_ROW])
+
+        assert statuses_under(bridge, TASK_NODE_ID) == [
+            PERFORMED_ROW.status,
+            FAILED_ROW.status,
+        ]
+
+    def test_the_task_of_the_summaries_is_published(self):
+        bridge = Bridge()
+
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW])
+
+        assert bridge.get_llm_plan()["task"] == TASK
+
+    def test_publishing_again_replaces_the_earlier_summaries(self):
+        """
+        Every publish carries the whole run so far, so it replaces rather than grows.
+        """
+        bridge = Bridge()
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW])
+
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW, FAILED_ROW])
+
+        assert labels_under(bridge, TASK_NODE_ID) == [
+            PERFORMED_ROW.label,
+            FAILED_ROW.label,
+        ]
+
+    def test_a_new_task_drops_the_steps_of_the_earlier_one(self, context):
+        bridge = Bridge()
+        bridge.publish_llm_plan_step(TASK, "OpenAction", two_step_plan(context))
+
+        bridge.publish_execution_summaries("Open the cabinet", [PERFORMED_ROW])
+
+        assert labels_under(bridge, TASK_NODE_ID) == [PERFORMED_ROW.label]
+
+    def test_a_new_task_drops_the_summaries_of_the_earlier_one(self, context):
+        bridge = Bridge()
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW])
+
+        bridge.publish_llm_plan_step(
+            "Open the cabinet", "OpenAction", two_step_plan(context)
+        )
+
+        assert labels_under(bridge, TASK_NODE_ID) == ["OpenAction"]
+
+    def test_a_new_summary_changes_the_signature(self):
+        bridge = Bridge()
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW])
+        before = bridge.get_llm_plan()["signature"]
+
+        bridge.publish_execution_summaries(TASK, [PERFORMED_ROW, FAILED_ROW])
+
+        assert bridge.get_llm_plan()["signature"] != before

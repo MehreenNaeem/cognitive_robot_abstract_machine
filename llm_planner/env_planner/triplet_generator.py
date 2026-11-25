@@ -5,8 +5,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from requests import RequestException
-from typing_extensions import Any, Optional, Protocol
+from typing_extensions import Any, Optional
 
 from coraplex.robot_plans.actions.base import ActionDescription
 from coraplex.robot_plans.actions.composite.tool_based import (
@@ -28,7 +27,7 @@ from llm_planner.env_reasoner.object_action_affordance import (
     get_object_action_list,
 )
 from llm_planner.env_reasoner.object_constraints import ObjectAffordanceReasoner
-from llm_planner.ollama_config import DEFAULT_MODEL, chat_with_model, get_response
+from llm_planner.env_reasoner.LLM_utilities import LanguageModel
 from krrood.utils import recursive_subclasses
 
 import semantic_digital_twin.semantic_annotations.semantic_annotations
@@ -679,132 +678,6 @@ if __name__ == "__main__":
 # %% action sequence prediction
 
 
-class LanguageModel(Protocol):
-    """
-    A model that answers a prompt with text.
-    """
-
-    def complete(self, prompt: str) -> str:
-        """
-        :param prompt: The prompt to answer.
-        :return: The model's answer.
-        """
-
-
-class ChatCompletionField(StrEnum):
-    """
-    The keys of the chat completion payload an OpenAI-compatible endpoint answers with.
-    """
-
-    CHOICES = "choices"
-    """
-    The answers the model produced.
-    """
-
-    MESSAGE = "message"
-    """
-    One choice's message.
-    """
-
-    CONTENT = "content"
-    """
-    A message's text.
-    """
-
-
-class EmptyChatCompletionError(RuntimeError):
-    """
-    Raised when a chat completion payload carries no answer to read.
-    """
-
-    def __init__(self, payload: dict[str, object]) -> None:
-        super().__init__(f"Chat completion carries no choice: {payload}")
-        self.payload = payload
-        """
-        The payload that was answered with.
-        """
-
-
-@dataclass
-class ChatCompletion:
-    """
-    The part of an OpenAI-compatible chat completion payload that is read back.
-    """
-
-    content: str
-    """
-    The text of the model's first answer.
-    """
-
-    @classmethod
-    def from_json(cls, payload: dict[str, object]) -> ChatCompletion:
-        """
-        Read a chat completion payload.
-
-        :param payload: The endpoint's decoded JSON answer.
-        :return: The completion it carries.
-        :raises EmptyChatCompletionError: If the payload carries no choice.
-        """
-        choices = payload.get(ChatCompletionField.CHOICES, [])
-        if not choices:
-            raise EmptyChatCompletionError(payload)
-        return cls(
-            content=choices[0][ChatCompletionField.MESSAGE][ChatCompletionField.CONTENT]
-        )
-
-
-class LanguageModelUnreachable(RuntimeError):
-    """
-    Raised when the language model's endpoint could not be reached at all.
-    """
-
-    def __init__(self, url: str, reason: Exception) -> None:
-        super().__init__(f"the language model at {url} could not be reached: {reason}")
-        self.url = url
-        """
-        The endpoint that did not answer.
-        """
-
-        self.reason = reason
-        """
-        What the request failed with.
-        """
-
-
-@dataclass
-class OllamaLanguageModel:
-    """
-    A :class:`LanguageModel` served by an Ollama chat completions endpoint.
-    """
-
-    url: str
-    """
-    Address of the chat completions endpoint.
-    """
-
-    user_id: str
-    """
-    Authorization header value the endpoint expects.
-    """
-
-    model: str = DEFAULT_MODEL
-    """
-    Name of the model to prompt.
-    """
-
-    def complete(self, prompt: str) -> str:
-        """
-        :param prompt: The prompt to answer.
-        :return: The model's answer, with any reasoning block removed.
-        :raises LanguageModelUnreachable: If the endpoint could not be reached.
-        """
-        try:
-            payload = chat_with_model(prompt, self.url, self.user_id, self.model)
-        except RequestException as error:
-            raise LanguageModelUnreachable(self.url, error) from error
-        return get_response(ChatCompletion.from_json(payload).content)
-
-
 class ActionSequencePredictionError(RuntimeError):
     """
     Raised when no attempt produced a response that passes every check.
@@ -895,7 +768,7 @@ class ActionSequencePredictor:
             task=task, object_types=self.object_types, rule_source=self.rule_source
         )
 
-    def predict(self, task: str,vis=False) -> list[Triplet]:
+    def predict(self, task: str, vis=False, TS: bool = False) -> list[Triplet]:
         """
         Ground a task into the sequence of triplets that carries it out.
 
@@ -908,6 +781,18 @@ class ActionSequencePredictor:
         prompt = generator.build_prompt()
         if vis:
             print(f"Prompt:\n{prompt}")
+
+        # TODO REMOVE IT AFTER TESTING
+        # Troubleshooting with response
+        if TS:
+            import json
+
+            response = '[{"source_object": "Apple", "target_object": "Table", "action": "PlaceAction"}]'  #'[{"source_object": "Milk", "target_object": "Table", "action": "PlaceAction"}]'
+            # {"source_object": "Bowl", "target_object": "Bowl", "action": "PickUpAction"},
+            try:
+                return checker.parse(str(response))
+            except TripletResponseError:
+                return
 
         failures: list[TripletResponseError] = []
         while len(failures) < self.attempts:

@@ -54,6 +54,12 @@ MESH_SUBDIRECTORY = "live"
 Directory bundled meshes nest under inside the scene's ``meshes/`` tree.
 """
 
+BUNDLE_LAYOUT = 4
+"""
+Version of how a bundle lays out its files. Raise it whenever that changes, so a bundle
+written before is rebuilt instead of reused for an unchanged world.
+"""
+
 
 @dataclass(frozen=True)
 class WorldModelsBundle:
@@ -146,21 +152,26 @@ def build_live_scene(bridge: Bridge) -> Optional[str]:
     output_directory = paths.local_scenes_directory() / paths.LIVE_SCENE_NAME
     with BUILD_LOCK:
         signature = bridge.bundle_signature()
-        if _existing_signature(output_directory) == signature:
+        if _existing_bundle_is_current(output_directory, signature):
             return paths.LIVE_SCENE_NAME
         return _write_bundle(bridge, output_directory, signature)
 
 
-def _existing_signature(output_directory: Path) -> Optional[str]:
+def _existing_bundle_is_current(output_directory: Path, signature: str) -> bool:
     """
-    The signature the existing bundle was built from, or None without a readable one.
+    Whether the existing bundle can be reused: it was built from the same world model,
+    in the current :data:`BUNDLE_LAYOUT`.
 
     :param output_directory: Directory the previous bundle was written to.
+    :param signature: The digest of the current world model.
     """
     scene = GeneratedJson(output_directory / "scene.json").read()
     if not isinstance(scene, dict):
-        return None
-    return scene.get("bundleSignature")
+        return False
+    return (
+        scene.get("bundleSignature") == signature
+        and scene.get("bundleLayout") == BUNDLE_LAYOUT
+    )
 
 
 def _write_bundle(bridge: Bridge, output_directory: Path, signature: str) -> str:
@@ -193,6 +204,8 @@ def _write_bundle(bridge: Bridge, output_directory: Path, signature: str) -> str
         # what this bundle was built from; while it is unchanged, /live_scene leaves
         # the bundle untouched instead of deleting files a viewer may be downloading
         "bundleSignature": signature,
+        # how the files are laid out; a bundle of another layout is rebuilt
+        "bundleLayout": BUNDLE_LAYOUT,
     }
     (output_directory / "scene.json").write_text(json.dumps(scene, indent=1))
     return paths.LIVE_SCENE_NAME

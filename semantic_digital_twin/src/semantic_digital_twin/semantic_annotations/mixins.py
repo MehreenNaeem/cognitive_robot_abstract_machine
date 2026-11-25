@@ -600,12 +600,10 @@ class HasMechanicalJoint(HasRootBody, PartWholeRelationship):
         if id(self) in visited:
             return []
         visited.add(id(self))
-        kinematic_structure_entities = (
-            self._world.get_kinematic_structure_entities_of_branch(self.root)
-        )
-        if self.mechanical_joint is not None:
-            kinematic_structure_entities.append(self.mechanical_joint.root)
-        return kinematic_structure_entities
+        branch = self._world.get_kinematic_structure_entities_of_branch(self.root)
+        if self.mechanical_joint is None:
+            return list(branch)
+        return [*branch, self.mechanical_joint.root]
 
 
 @dataclass(eq=False)

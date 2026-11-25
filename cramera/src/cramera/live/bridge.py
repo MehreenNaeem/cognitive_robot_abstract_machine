@@ -55,7 +55,11 @@ from semantic_digital_twin.world_description.connections import (
 from semantic_digital_twin.world_description.world_entity import Region
 
 from cramera.knowledge.enums import PlanNodeGroup
+from cramera.live.feasibility_tree import FeasibilityTreeSnapshot
+from cramera.live.goal_tree import GoalTreeSnapshot
+from cramera.live.interaction_graph import InteractionGraphSnapshot
 from cramera.live.llm_plan import (
+    ExecutionSummaryRow,
     GroundedStep,
     LlmPlanNode,
     LlmPlanSnapshot,
@@ -76,7 +80,13 @@ if TYPE_CHECKING:
     from semantic_digital_twin.world import World
     from semantic_digital_twin.world_description.world_entity import Body, Connection
 
+    import rustworkx
+
     from cramera.live.recording import Recording
+    from llm_planner.env_reasoner.reasoner_graphs.goal_state import GoalDefinition
+    from llm_planner.env_reasoner.reasoner_graphs.Interactive_graph import (
+        InteractionGraph,
+    )
 
 logger = get_logger(__name__)
 
@@ -736,6 +746,33 @@ class Bridge:
     _llm_steps: List[GroundedStep] = field(default_factory=list)
     """
     The steps the task has been grounded into so far, in the order they were published.
+    """
+
+    _llm_summaries: List[ExecutionSummaryRow] = field(default_factory=list)
+    """
+    What became of every triplet and repair action of the task's run so far, in
+    execution order (see :meth:`publish_execution_summaries`).
+    """
+
+    interaction_graph_state: InteractionGraphSnapshot = field(
+        default_factory=InteractionGraphSnapshot
+    )
+    """
+    The newest interaction graph of the task's objects (see
+    :meth:`publish_interaction_graph`).
+    """
+
+    goal_tree_state: GoalTreeSnapshot = field(default_factory=GoalTreeSnapshot)
+    """
+    The newest goal state of the task (see :meth:`publish_goal`).
+    """
+
+    feasibility_tree_state: FeasibilityTreeSnapshot = field(
+        default_factory=FeasibilityTreeSnapshot
+    )
+    """
+    The newest action feasibility tree of a failure repair (see
+    :meth:`publish_feasibility_tree`).
     """
 
     _chart: Optional[MotionStatechart] = None
@@ -1525,11 +1562,41 @@ class Bridge:
         :param plan: The plan that carries that step out.
         """
         with self._lock:
-            if task != self.llm_task:
-                self.llm_task = task
-                self._llm_steps = []
+            self._start_llm_task(task)
             self._llm_steps.append(GroundedStep(label=label, plan=plan))
         self.snapshot_llm_plan()
+
+    def publish_execution_summaries(
+        self, task: str, summaries: List[ExecutionSummaryRow]
+    ) -> None:
+        """
+        Show what became of a task's run so far under the task in the LLM-planner tree.
+
+        Each call carries the whole run, so it replaces the summaries published before;
+        naming a different task starts a new tree.
+
+        :param task: The task statement the language model was given.
+        :param summaries: What became of every triplet and repair action, in execution
+            order.
+        """
+        with self._lock:
+            self._start_llm_task(task)
+            self._llm_summaries = list(summaries)
+        self.snapshot_llm_plan()
+
+    def _start_llm_task(self, task: str) -> None:
+        """
+        Drop the steps and summaries of an earlier task when ``task`` is a new one.
+
+        Called with :attr:`_lock` held.
+
+        :param task: The task statement being published.
+        """
+        if task == self.llm_task:
+            return
+        self.llm_task = task
+        self._llm_steps = []
+        self._llm_summaries = []
 
     def snapshot_llm_plan(self) -> None:
         """
@@ -1541,6 +1608,7 @@ class Bridge:
         """
         with self._lock:
             steps = list(self._llm_steps)
+            summaries = list(self._llm_summaries)
             task = self.llm_task
         nodes = [
             LlmPlanNode(
@@ -1557,6 +1625,19 @@ class Bridge:
             step_id = "llm_step_%d" % index
             step_status = self._append_step_nodes(step, step_id, nodes, order)
             task_status = self._max_status(task_status, step_status)
+        for index, summary in enumerate(summaries):
+            summary_id = "llm_summary_%d" % index
+            nodes.append(
+                LlmPlanNode(
+                    id=summary_id,
+                    parent=TASK_NODE_ID,
+                    label=summary.label,
+                    status=summary.status.value,
+                    group=PlanNodeGroup.ACTION.value,
+                )
+            )
+            order.append(summary_id)
+            task_status = self._max_status(task_status, summary.status.value)
         nodes[0] = replace(nodes[0], status=self._whole_task_status(task_status, nodes))
         with self._lock:
             self.llm_plan_state = LlmPlanSnapshot(
@@ -1641,6 +1722,63 @@ class Bridge:
         """
         with self._lock:
             return self.llm_plan_state.to_payload()
+
+    # %% the interaction graph of the task's objects
+    def publish_interaction_graph(self, graph: InteractionGraph) -> None:
+        """
+        Replace the interaction graph the viewer's Interaction tab draws.
+
+        :param graph: The selected objects of the task and the relations between them.
+        """
+        snapshot = InteractionGraphSnapshot.from_graph(graph)
+        with self._lock:
+            self.interaction_graph_state = snapshot
+
+    def get_interaction_graph(self) -> Dict[str, Any]:
+        """
+        The newest interaction graph (safe to call from HTTP threads).
+        """
+        with self._lock:
+            return self.interaction_graph_state.to_payload()
+
+    # %% the goal state of the task
+    def publish_goal(self, goal: GoalDefinition) -> None:
+        """
+        Replace the goal the viewer's Goal tab draws.
+
+        :param goal: The goal state of the task.
+        """
+        snapshot = GoalTreeSnapshot.from_goal(goal)
+        with self._lock:
+            self.goal_tree_state = snapshot
+
+    def get_goal_tree(self) -> Dict[str, Any]:
+        """
+        The newest goal tree (safe to call from HTTP threads).
+        """
+        with self._lock:
+            return self.goal_tree_state.to_payload()
+
+    # %% the action feasibility tree of a failure repair
+    def publish_feasibility_tree(self, tree: rustworkx.PyDiGraph) -> None:
+        """
+        Replace the action feasibility tree the viewer's AFG tab draws.
+
+        :param tree: Which actions can be performed on which objects, with which arm
+            and from which approach direction, as
+            :func:`llm_planner.env_reasoner.reasoner_graphs.AFG.feasibility_tree`
+            builds it.
+        """
+        snapshot = FeasibilityTreeSnapshot.from_tree(tree)
+        with self._lock:
+            self.feasibility_tree_state = snapshot
+
+    def get_feasibility_tree(self) -> Dict[str, Any]:
+        """
+        The newest action feasibility tree (safe to call from HTTP threads).
+        """
+        with self._lock:
+            return self.feasibility_tree_state.to_payload()
 
     # %% plan tree
     def _live_motion_status(self, node: PlanNode) -> Optional[str]:

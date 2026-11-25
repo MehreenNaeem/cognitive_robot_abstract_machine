@@ -17,6 +17,7 @@ from llm_planner.env_reasoner.action_constraints import AVAILABLE_ACTIONS
 from semantic_digital_twin.semantic_annotations.mixins import (
     HasDoors,
     HasHandle,
+    HasSupportingSurface,
     IsStorageSpace,
 )
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
@@ -60,7 +61,7 @@ class ObjectAffordance(StrEnum):
 class AffordanceRule:
     """
     Grants a fixed set of affordances to every semantic annotation type that is a
-    subclass of :attr:`annotation_type`.
+    subclass of :attr:`annotation_type` and of every type in :attr:`also_required_types`.
     """
 
     annotation_type: type[SemanticAnnotation]
@@ -72,6 +73,23 @@ class AffordanceRule:
     """
     Affordances granted to every matching semantic annotation type.
     """
+
+    also_required_types: frozenset[type] = frozenset()
+    """
+    Further types, typically mixins, a matching semantic annotation type must also be
+    a subclass of.
+    """
+
+    def matches(self, annotation_type: type[SemanticAnnotation]) -> bool:
+        """
+        :param annotation_type: A semantic annotation class.
+        :return: Whether ``annotation_type`` is a subclass of :attr:`annotation_type`
+            and of every type in :attr:`also_required_types`.
+        """
+        return issubclass(annotation_type, self.annotation_type) and all(
+            issubclass(annotation_type, required_type)
+            for required_type in self.also_required_types
+        )
 
 
 #: Food subtypes whose loaf/block shape can be sliced, in addition to :class:`Fruit`
@@ -101,6 +119,11 @@ AFFORDANCE_RULES: list[AffordanceRule] = [
     AffordanceRule(Sink, frozenset({ObjectAffordance.RECEPTACLE})),
     AffordanceRule(Oven, frozenset({ObjectAffordance.RECEPTACLE})),
     AffordanceRule(Cuttlery, frozenset({ObjectAffordance.GRASPABLE})),
+    AffordanceRule(
+        Cuttlery,
+        frozenset({ObjectAffordance.RECEPTACLE}),
+        also_required_types=frozenset({HasSupportingSurface}),
+    ),
     AffordanceRule(
         HasHandle, frozenset({ObjectAffordance.OPENABLE, ObjectAffordance.CLOSABLE})
     ),
@@ -135,7 +158,7 @@ class ObjectAffordanceReasoner:
         """
         affordances: set[ObjectAffordance] = set()
         for rule in self.rules:
-            if issubclass(annotation_type, rule.annotation_type):
+            if rule.matches(annotation_type):
                 affordances.update(rule.affordances)
 
         if annotation_type in ADDITIONAL_CUTABLE_FOOD_TYPES:
@@ -171,7 +194,7 @@ ACTION_AFFORDANCE_REQUIREMENTS: list[ActionAffordanceRequirement] = [
     ActionAffordanceRequirement(OpenAction, frozenset({ObjectAffordance.OPENABLE})),
     ActionAffordanceRequirement(CloseAction, frozenset({ObjectAffordance.CLOSABLE})),
     ActionAffordanceRequirement(PickUpAction, frozenset({ObjectAffordance.GRASPABLE})),
-    ActionAffordanceRequirement(PlaceAction, frozenset({ObjectAffordance.GRASPABLE})),
+    ActionAffordanceRequirement(PlaceAction, frozenset({ObjectAffordance.RECEPTACLE})),  # ObjectAffordance.GRASPABLE
     ActionAffordanceRequirement(CuttingAction, frozenset({ObjectAffordance.CUTABLE})),
     ActionAffordanceRequirement(PouringAction, frozenset({ObjectAffordance.POURABLE})),
 ]

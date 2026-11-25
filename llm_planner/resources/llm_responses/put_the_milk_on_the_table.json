@@ -1,0 +1,12 @@
+[
+    {
+        "source_object": "Milk",
+        "target_object": "Milk",
+        "action": "PickUpAction"
+    },
+    {
+        "source_object": "Milk",
+        "target_object": "Table",
+        "action": "PlaceAction"
+    }
+]

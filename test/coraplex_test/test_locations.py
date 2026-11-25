@@ -10,6 +10,8 @@ from coraplex.datastructures.enums import Arms, ApproachDirection, VerticalAlign
 from coraplex.datastructures.grasp import GraspDescription
 from coraplex.locations.backends import GiskardLocationBackend
 from coraplex.locations.base import Location, PoseGeneratorBackend, PoseValidator
+from coraplex.locations.factories import _get_object_in_hand
+from coraplex.querying.predicates import GripperIsFree
 from coraplex.view_manager import ViewManager
 from semantic_digital_twin.api import RobotSpecification, WorldSpecification
 from semantic_digital_twin.exceptions import ParsingError
@@ -18,6 +20,8 @@ from semantic_digital_twin.robots.robot_parts import AbstractRobot
 from semantic_digital_twin.spatial_types import HomogeneousTransformationMatrix
 from semantic_digital_twin.spatial_types.spatial_types import Pose
 from semantic_digital_twin.world import World
+
+from .test_predicates import hang_body_below
 
 # %% test doubles
 
@@ -205,3 +209,37 @@ def test_giskard_backend_yields_the_candidate_it_placed_the_robot_at(
 
     assert len(yielded_poses) == 1
     np.testing.assert_allclose(yielded_poses[0].to_np(), candidate.to_np(), atol=1e-9)
+
+
+# %% the body a gripper holds
+
+
+class TestObjectInHand:
+    def test_an_empty_gripper_holds_nothing(self, single_robot_world) -> None:
+        world, robot, _ = single_robot_world
+
+        assert _get_object_in_hand(robot, world, Arms.LEFT) is None
+
+    def test_the_body_hanging_below_the_tool_frame_is_the_object_in_hand(
+        self, single_robot_world
+    ) -> None:
+        world, robot, _ = single_robot_world
+        end_effector = ViewManager.get_end_effector_view(Arms.LEFT, robot)
+        held_body = hang_body_below(world, end_effector)
+
+        assert _get_object_in_hand(robot, world, Arms.LEFT) is held_body
+
+    def test_the_object_in_hand_is_found_after_the_occupancy_was_checked(
+        self, single_robot_world
+    ) -> None:
+        """
+        Reading the gripper's occupancy must leave the branch below the tool frame as
+        it found it, since this reads the same branch afterwards.
+        """
+        world, robot, _ = single_robot_world
+        end_effector = ViewManager.get_end_effector_view(Arms.LEFT, robot)
+        held_body = hang_body_below(world, end_effector)
+
+        GripperIsFree(end_effector)()
+
+        assert _get_object_in_hand(robot, world, Arms.LEFT) is held_body

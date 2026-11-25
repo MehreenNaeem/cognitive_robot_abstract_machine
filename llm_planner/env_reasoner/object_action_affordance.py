@@ -17,7 +17,7 @@ from llm_planner.env_reasoner.object_constraints import (
     ObjectAffordanceReasoner,
     actions_available_for,
 )
-from llm_planner.env_reasoner.object_graphs import (
+from llm_planner.env_reasoner.reasoner_graphs.object_graphs import (
     mixin_bases,
     semantic_annotation_graph,
 )
@@ -199,7 +199,7 @@ def object_action_affordances(
     Map every concrete object in a subclass graph to its doable actions.
 
     Walks the subclass graph of ``root_annotation_type``
-    (:func:`~llm_planner.env_reasoner.object_graphs.semantic_annotation_graph`), then
+    (:func:`~llm_planner.env_reasoner.reasoner_graphs.object_graphs.semantic_annotation_graph`), then
     describes each leaf type with :func:`doable_actions_for`.
 
     :param root_annotation_type: A semantic annotation class or mixin whose concrete

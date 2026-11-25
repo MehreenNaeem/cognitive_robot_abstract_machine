@@ -310,7 +310,7 @@ FREE_PLACE_COLOR = Color(0.2, 0.8, 0.4, PLACE_ALPHA)
 Colour of a place an object still fits in.
 """
 
-OCCUPIED_PLACE_COLOR = Color(0.9, 0.3, 0.3, PLACE_ALPHA)
+OCCUPIED_PLACE_COLOR = Color(1, 1, 1, PLACE_ALPHA)
 """
 Colour of a place something already stands in.
 """
@@ -374,6 +374,21 @@ def add_region_to_world(
     # included, on one fresh timestamp for whoever publishes them.
     world.notify_state_change()
     return regions
+
+
+def remove_regions_from_world(regions: List[Region], world: World) -> None:
+    """
+    Take regions out of the world again, e.g. the searched places
+    :func:`add_region_to_world` put in, so a viewer stops drawing them.
+
+    :param regions: The regions to remove, each attached to its body.
+    :param world: The world holding the regions.
+    """
+    with world.modify_world():
+        for region in regions:
+            world.remove_connection(region.parent_connection)
+            world.remove_kinematic_structure_entity(region)
+    world.notify_state_change()
 
 
 def _region_of_places(

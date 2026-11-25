@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from semantic_digital_twin.semantic_annotations import mixins, semantic_annotations
+from semantic_digital_twin.semantic_annotations.mixins import (
+    HasRootKinematicStructureEntity,
+)
+from semantic_digital_twin.world import World
 
 
 DEFAULT_GRAPH_HTML_PATH = Path("semantic_annotation_graph.html")
@@ -46,6 +50,40 @@ def semantic_annotation_type_by_name(name: str) -> type:
     if name not in types_by_name:
         raise UnknownSemanticAnnotation(name)
     return types_by_name[name]
+
+
+class BodyWithoutSemanticAnnotation(Exception):
+    """
+    Raised when no semantic annotation of a world is rooted at a body.
+    """
+
+    def __init__(self, body_name: str) -> None:
+        super().__init__(f"No semantic annotation is rooted at body {body_name!r}.")
+        self.body_name = body_name
+        """
+        The name of the body that was looked up.
+        """
+
+
+def get_semantic_annotation_of_body(
+    body_name: str, world: World
+) -> HasRootKinematicStructureEntity:
+    """
+    Find the semantic annotation a body belongs to.
+
+    :param body_name: The name of the body to look up, e.g. ``"milk.stl"``.
+    :param world: The world holding the body and its annotations.
+    :return: The first annotation of the world whose root is the body.
+    :raises BodyWithoutSemanticAnnotation: If no annotation is rooted at the body.
+    """
+    body = world.get_body_by_name(body_name)
+    for annotation in world.semantic_annotations:
+        if (
+            isinstance(annotation, HasRootKinematicStructureEntity)
+            and annotation.root == body
+        ):
+            return annotation
+    raise BodyWithoutSemanticAnnotation(body_name)
 
 
 def mixin_bases(annotation_type: type, lineage: list[type]) -> list[type]:

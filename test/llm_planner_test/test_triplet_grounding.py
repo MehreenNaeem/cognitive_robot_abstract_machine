@@ -25,13 +25,18 @@ from llm_planner.env_planner.triplet_grounding import (
     ObjectNotInWorld,
     TripletGrounding,
 )
-from llm_planner.env_planner.utilities import unoccupied_region
+from llm_planner.env_planner.utilities import PlaceState, unoccupied_region
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Apple,
     Drawer,
     Milk,
 )
-from semantic_digital_twin.world_description.connections import ActiveConnection1DOF
+from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
+from semantic_digital_twin.world_description.connections import (
+    ActiveConnection1DOF,
+    FixedConnection,
+)
+from semantic_digital_twin.world_description.world_entity import Body
 
 DRAWER_BODY_NAME = "cabinet10_drawer_top"
 """
@@ -423,6 +428,118 @@ class TestGrasp:
         }
 
 
+# %% which arm performs the action
+
+
+def hold_new_body(world, robot, arm: Arms, name: str) -> Body:
+    """
+    Attach a new body to the tool frame of the arm's gripper, so the gripper holds it.
+
+    :param world: The world holding the robot.
+    :param robot: The robot whose gripper holds the body.
+    :param arm: The arm whose gripper holds the body.
+    :param name: The name of the new body.
+    :return: The held body.
+    """
+    body = Body(name=PrefixedName(name))
+    end_effector = ViewManager.get_end_effector_view(arm, robot)
+    with world.modify_world():
+        world.add_connection(
+            FixedConnection(parent=end_effector.tool_frame, child=body)
+        )
+    return body
+
+
+def hold_apple(world, robot, arm: Arms) -> Body:
+    """
+    Make the arm's gripper hold an apple, the only one in the world.
+
+    :return: The apple's body.
+    """
+    body = hold_new_body(world, robot, arm, "held_apple")
+    with world.modify_world():
+        world.add_semantic_annotation(Apple(root=body))
+    return body
+
+
+class TestArm:
+    def test_the_arm_holding_the_source_object_performs_the_action(
+        self, apartment_world_pr2_copy_with_context
+    ) -> None:
+        world, robot, _ = apartment_world_pr2_copy_with_context
+        hold_apple(world, robot, Arms.RIGHT)
+        grounding = TripletGrounding(world=world, arm=Arms.LEFT)
+
+        assert (
+            grounding.ground(triplet_of(Apple, Apple, PickUpAction)).arm is Arms.RIGHT
+        )
+
+    def test_the_free_arm_performs_the_action_when_the_other_holds_something_else(
+        self, apartment_world_pr2_copy_with_context
+    ) -> None:
+        world, robot, _ = apartment_world_pr2_copy_with_context
+        hold_new_body(world, robot, Arms.LEFT, "held_body")
+        grounding = TripletGrounding(world=world, arm=Arms.LEFT)
+
+        assert (
+            grounding.ground(triplet_of(Milk, Drawer, PickUpAction)).arm is Arms.RIGHT
+        )
+
+    def test_the_default_arm_performs_the_action_when_both_are_free(
+        self, apartment_world_pr2_copy_with_context
+    ) -> None:
+        world, _, _ = apartment_world_pr2_copy_with_context
+        grounding = TripletGrounding(world=world, arm=Arms.RIGHT)
+
+        assert (
+            grounding.ground(triplet_of(Milk, Drawer, PickUpAction)).arm is Arms.RIGHT
+        )
+
+    def test_the_default_arm_performs_the_action_when_both_hold_something_else(
+        self, apartment_world_pr2_copy_with_context
+    ) -> None:
+        world, robot, _ = apartment_world_pr2_copy_with_context
+        hold_new_body(world, robot, Arms.LEFT, "left_held_body")
+        hold_new_body(world, robot, Arms.RIGHT, "right_held_body")
+        grounding = TripletGrounding(world=world, arm=Arms.LEFT)
+
+        assert grounding.ground(triplet_of(Milk, Drawer, PickUpAction)).arm is Arms.LEFT
+
+    def test_the_default_arm_is_kept_for_later_triplets(
+        self, apartment_world_pr2_copy_with_context
+    ) -> None:
+        world, robot, _ = apartment_world_pr2_copy_with_context
+        hold_new_body(world, robot, Arms.LEFT, "held_body")
+        grounding = TripletGrounding(world=world, arm=Arms.LEFT)
+
+        grounding.ground(triplet_of(Milk, Drawer, PickUpAction))
+
+        assert grounding.arm is Arms.LEFT
+
+    def test_the_grasp_uses_the_end_effector_of_the_chosen_arm(
+        self, apartment_world_pr2_copy_with_context
+    ) -> None:
+        world, robot, _ = apartment_world_pr2_copy_with_context
+        hold_new_body(world, robot, Arms.LEFT, "held_body")
+        grounding = TripletGrounding(world=world, arm=Arms.LEFT)
+
+        grasp = grounding.ground(
+            triplet_of(Milk, Drawer, PickUpAction)
+        ).grasp_description
+
+        assert grasp.end_effector is ViewManager.get_end_effector_view(
+            Arms.RIGHT, robot
+        )
+
+    def test_the_default_arm_is_used_in_a_world_without_a_robot(
+        self, grounding
+    ) -> None:
+        assert (
+            grounding.ground(triplet_of(Drawer, Drawer, OpenAction)).arm
+            is grounding.arm
+        )
+
+
 # %% which of several objects of one type a triplet means
 
 
@@ -515,3 +632,60 @@ class TestChoosingBetweenObjects:
 
         assert grounding.robot_body() is None
         assert grounding.body_of(Drawer) is grounding.bodies_of(Drawer)[0]
+
+
+# %% showing the searched places
+
+
+def place_regions(world) -> list[str]:
+    """
+    :return: The names of the regions of searched places in ``world``, sorted.
+    """
+    return sorted(
+        region.name.name
+        for region in world.regions
+        if region.name.name.endswith("_places")
+    )
+
+
+class TestShownOccupancy:
+    def test_the_searched_places_are_not_shown_by_default(
+        self, grounding, apartment_world_copy
+    ) -> None:
+        drawer = apartment_world_copy.get_body_by_name(DRAWER_BODY_NAME)
+        opened(apartment_world_copy, drawer, 0.4)
+
+        grounding.ground(triplet_of(Milk, Drawer, PlaceAction))
+
+        assert place_regions(apartment_world_copy) == []
+
+    def test_the_free_places_of_the_target_are_shown_when_asked_to(
+        self, apartment_world_copy
+    ) -> None:
+        drawer = apartment_world_copy.get_body_by_name(DRAWER_BODY_NAME)
+        opened(apartment_world_copy, drawer, 0.4)
+        milk = apartment_world_copy.get_body_by_name(MILK_BODY_NAME)
+        grounding = TripletGrounding(world=apartment_world_copy, show_occupancy=True)
+        free_places = unoccupied_region(
+            drawer, apartment_world_copy, place_size=grounding.size_of(milk)
+        ).free
+
+        grounding.ground(triplet_of(Milk, Drawer, PlaceAction))
+
+        [free_region] = [
+            region
+            for region in apartment_world_copy.regions
+            if region.name.name == f"{DRAWER_BODY_NAME}_{PlaceState.FREE}_places"
+        ]
+        assert len(free_region.area.shapes) == len(free_places)
+
+    def test_only_the_newest_search_is_shown(self, apartment_world_copy) -> None:
+        drawer = apartment_world_copy.get_body_by_name(DRAWER_BODY_NAME)
+        opened(apartment_world_copy, drawer, 0.4)
+        grounding = TripletGrounding(world=apartment_world_copy, show_occupancy=True)
+        grounding.ground(triplet_of(Milk, Drawer, PlaceAction))
+        shown_once = place_regions(apartment_world_copy)
+
+        grounding.ground(triplet_of(Milk, Drawer, PlaceAction))
+
+        assert place_regions(apartment_world_copy) == shown_once

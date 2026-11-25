@@ -8,6 +8,7 @@ import logging
 
 import pytest
 
+from coraplex.plans.factories import sequential
 from coraplex.plans.plan_node import ActionNode
 from coraplex.robot_plans.actions.core.container import OpenAction
 from coraplex.robot_plans.actions.core.pick_up import PickUpAction
@@ -214,11 +215,13 @@ def triplet_of(source, target, action) -> Triplet:
     return Triplet(source_object=source, target_object=target, action=action)
 
 
-def performed_actions(plan) -> list[str]:
+def performed_actions(steps, context) -> list[str]:
     """
-    :param plan: The plan to read.
-    :return: The name of every action designator in the plan, in execution order.
+    :param steps: The steps :func:`plan_grounding` returned.
+    :param context: The context to compose them into a plan in.
+    :return: The name of every action designator in those steps, in execution order.
     """
+    plan = sequential(steps, context=context).plan
     return [
         type(node.designator).__name__
         for node in plan.nodes
@@ -300,9 +303,9 @@ class TestPlanGrounding:
             triplet_of(Milk, Drawer, PickUpAction),
         )
 
-        plan = plan_grounding(grounded_triplets, context)
+        steps = plan_grounding(grounded_triplets, context)
 
-        assert performed_actions(plan) == [
+        assert performed_actions(steps, context) == [
             ParkArmsAction.__name__,
             MoveTorsoAction.__name__,
             OpenAction.__name__,
@@ -311,7 +314,7 @@ class TestPlanGrounding:
             PickUpAction.__name__,
         ]
 
-    def test_the_plan_is_performed_in_the_given_context(
+    def test_the_steps_are_composed_into_a_plan_in_the_given_context(
         self, apartment_world_pr2_copy_with_context
     ) -> None:
         world, _, context = apartment_world_pr2_copy_with_context
@@ -319,7 +322,9 @@ class TestPlanGrounding:
             world, triplet_of(Drawer, Drawer, OpenAction)
         )
 
-        plan = plan_grounding(grounded_triplets, context)
+        plan = sequential(
+            plan_grounding(grounded_triplets, context), context=context
+        ).plan
 
         assert plan.context is context
         assert plan.world is world
@@ -334,14 +339,14 @@ class TestPlanGrounding:
             triplet_of(Milk, Drawer, PlaceAction),
         )
 
-        plan = plan_grounding(grounded_triplets, context)
+        steps = plan_grounding(grounded_triplets, context)
 
-        assert PlaceAction.__name__ not in performed_actions(plan)
-        assert OpenAction.__name__ in performed_actions(plan)
+        assert PlaceAction.__name__ not in performed_actions(steps, context)
+        assert OpenAction.__name__ in performed_actions(steps, context)
 
-    def test_an_empty_sequence_plans_nothing(
+    def test_an_empty_sequence_yields_no_steps(
         self, apartment_world_pr2_copy_with_context
     ) -> None:
         _, _, context = apartment_world_pr2_copy_with_context
 
-        assert performed_actions(plan_grounding([], context)) == []
+        assert performed_actions(plan_grounding([], context), context) == []

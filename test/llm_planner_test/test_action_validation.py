@@ -5,6 +5,8 @@ Tests of checking an action's pre-condition without performing it, for every act
 
 from __future__ import annotations
 
+import inspect
+import operator
 from copy import deepcopy
 
 import pytest
@@ -12,6 +14,8 @@ import pytest
 from coraplex.datastructures.dataclasses import Context
 from coraplex.datastructures.enums import ApproachDirection, Arms, VerticalAlignment
 from coraplex.datastructures.grasp import GraspDescription
+from coraplex.locations.pose_validator import IsObjectReachableBy
+from coraplex.querying.predicates import GripperIsFree, GripperIsNotFree
 from coraplex.robot_plans.actions.composite.tool_based import (
     CuttingAction,
     MixingAction,
@@ -27,11 +31,17 @@ from coraplex.view_manager import ViewManager
 from llm_planner.env_planner.action_validation import (
     ActionNotCheckable,
     CHECKABLE_ACTIONS,
+    ConditionStatement,
     check_post_condition,
     check_pre_condition,
 )
+from krrood.entity_query_language.factories import and_, evaluate_condition, or_
+from krrood.entity_query_language.operators.comparator import Comparator
+from krrood.entity_query_language.operators.core_logical_operators import OR, Not
 from llm_planner.env_reasoner.action_constraints import ConditionKind
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
+from semantic_digital_twin.reasoning.predicates import allclose
+from semantic_digital_twin.reasoning.robot_predicates import is_body_gripped
 from semantic_digital_twin.robots.pr2 import PR2
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     CuttingKnife,
@@ -386,3 +396,177 @@ class TestUnsupportedAction:
             check_post_condition(action, bare_context)
 
         assert excinfo.value.action is action
+
+
+# %% which statement of a condition failed
+
+
+class TestConditionStatement:
+    def test_every_operand_of_a_failed_condition_is_reported(
+        self, action_world
+    ) -> None:
+        """
+        A place is allowed either because the gripper is not free or because the object
+        is held, so both statements of that ``or_`` are reported with their own truth.
+        """
+        world, robot, context = action_world
+        action = PlaceAction(
+            object_designator=world.get_body_by_name(MILK_BODY_NAME),
+            target_location=robot.root.global_pose,
+            arm=Arms.LEFT,
+        )
+
+        statement = check_pre_condition(action, context).statement
+
+        assert statement.name == OR.__name__
+        assert statement.satisfied is False
+        gripper_is_not_free, object_is_held = statement.operands
+        assert gripper_is_not_free.name == Not.__name__
+        assert gripper_is_not_free.satisfied is False
+        assert [operand.name for operand in gripper_is_not_free.operands] == [
+            GripperIsFree.__name__
+        ]
+        assert gripper_is_not_free.operands[0].satisfied is True
+        assert object_is_held.name == is_body_gripped.__name__
+        assert object_is_held.satisfied is False
+
+    def test_a_statement_is_described_by_the_documentation_of_what_it_checks(
+        self, action_world
+    ) -> None:
+        """
+        The milk stands out of reach, so the open is refused by the reachability
+        predicate, which says what it checks.
+        """
+        world, robot, context = action_world
+        action = OpenAction(
+            object_designator=world.get_body_by_name(MILK_BODY_NAME), arm=Arms.LEFT
+        )
+
+        statement = check_pre_condition(action, context).statement
+
+        reachability = statement.operands[1]
+        assert reachability.name == IsObjectReachableBy.__name__
+        assert reachability.satisfied is False
+        assert reachability.description != ""
+        assert " ".join(inspect.getdoc(IsObjectReachableBy).split()).startswith(
+            reachability.description
+        )
+
+    def test_the_false_statements_are_the_innermost_ones_that_failed(
+        self, action_world
+    ) -> None:
+        """
+        A statement combining others is not itself the reason: the place fails because
+        the gripper is free and because the milk is not held, not because an ``or_``
+        of the two is false.
+        """
+        world, robot, context = action_world
+        action = PlaceAction(
+            object_designator=world.get_body_by_name(MILK_BODY_NAME),
+            target_location=robot.root.global_pose,
+            arm=Arms.LEFT,
+        )
+
+        check = check_pre_condition(action, context)
+
+        assert check.false_statement_names == [
+            Not.__name__,
+            is_body_gripped.__name__,
+        ]
+
+    def test_a_statement_reached_through_two_branches_is_reported_once(
+        self, action_world
+    ) -> None:
+        """
+        One predicate standing in two branches of a condition is one reason it failed,
+        not one reason per branch, while a second predicate that reads alike is its
+        own reason.
+        """
+        _, robot, _ = action_world
+        end_effector = ViewManager.get_end_effector_view(Arms.LEFT, robot)
+        shared = GripperIsNotFree(end_effector)
+        condition = and_(shared, or_(shared, GripperIsNotFree(end_effector)))
+
+        statement = ConditionStatement.from_expression(
+            condition, evaluate_condition(condition)
+        )
+
+        assert [failure.name for failure in statement.innermost_failures] == [
+            GripperIsNotFree.__name__,
+            GripperIsNotFree.__name__,
+        ]
+
+    def test_two_statements_that_read_alike_are_both_reported(
+        self, action_world
+    ) -> None:
+        """
+        An open is refused both because the handle is not in the gripper and because
+        the drawer did not move, two comparisons that read as the same operator.
+        """
+        world, _, context = action_world
+        action = OpenAction(
+            object_designator=world.get_body_by_name(DRAWER_BODY_NAME), arm=Arms.LEFT
+        )
+
+        check = check_post_condition(action, context)
+
+        greater_than = Comparator.operation_name_map[operator.gt]
+        assert check.false_statement_names == [
+            greater_than,
+            allclose.__name__,
+            greater_than,
+        ]
+
+    def test_a_satisfied_condition_has_nothing_to_report(self, bare_context) -> None:
+        check = check_pre_condition(
+            CloseAction(object_designator=body_named("handle"), arm=Arms.LEFT),
+            bare_context,
+        )
+
+        assert check.satisfied is True
+        assert check.statement is None
+        assert check.false_statements == []
+
+    def test_the_report_shows_every_statement_with_whether_it_holds(
+        self, action_world
+    ) -> None:
+        world, robot, context = action_world
+        action = PlaceAction(
+            object_designator=world.get_body_by_name(MILK_BODY_NAME),
+            target_location=robot.root.global_pose,
+            arm=Arms.LEFT,
+        )
+
+        report = check_pre_condition(action, context).statement.report()
+
+        assert report == "\n".join(
+            [
+                f"{OR.__name__}: fails",
+                f"    {Not.__name__}: fails",
+                f"        {GripperIsFree.__name__}: holds",
+                f"    {is_body_gripped.__name__}: fails",
+            ]
+        )
+
+    def test_a_statement_reads_as_its_name_and_what_it_checks(
+        self, action_world
+    ) -> None:
+        """
+        An operator combines other statements rather than checking something itself,
+        so it is named without a description, while a predicate carries one.
+        """
+        world, robot, context = action_world
+        action = PlaceAction(
+            object_designator=world.get_body_by_name(MILK_BODY_NAME),
+            target_location=robot.root.global_pose,
+            arm=Arms.LEFT,
+        )
+
+        gripper_is_not_free, object_is_held = check_pre_condition(
+            action, context
+        ).false_statements
+
+        assert gripper_is_not_free.summary == Not.__name__
+        assert object_is_held.summary == (
+            f"{is_body_gripped.__name__}: {object_is_held.description}"
+        )

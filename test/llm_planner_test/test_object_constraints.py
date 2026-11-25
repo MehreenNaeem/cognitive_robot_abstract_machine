@@ -21,11 +21,14 @@ from semantic_digital_twin.semantic_annotations.mixins import (
 )
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Apple,
+    Bowl,
     Cabinet,
     CookingContainer,
     Drawer,
+    Fork,
     Milk,
     Pan,
+    Plate,
     Table,
     ToolWithHandle,
     Vase,
@@ -143,3 +146,26 @@ class TestOpenAndCloseAffordances:
     def test_object_with_neither_doors_nor_a_handle_is_not_openable(self) -> None:
         assert not issubclass(Vase, (HasDoors, HasHandle))
         assert ObjectAffordance.OPENABLE not in self.reasoner.affordances_for(Vase)
+
+
+# %% cutlery with a supporting surface
+
+
+class TestCutleryWithSupportingSurface:
+    def setup_method(self) -> None:
+        self.reasoner = ObjectAffordanceReasoner()
+
+    def test_plate_is_a_graspable_receptacle(self) -> None:
+        assert self.reasoner.affordances_for(Plate) == {
+            ObjectAffordance.GRASPABLE,
+            ObjectAffordance.RECEPTACLE,
+        }
+
+    def test_bowl_is_a_graspable_receptacle(self) -> None:
+        assert self.reasoner.affordances_for(Bowl) == {
+            ObjectAffordance.GRASPABLE,
+            ObjectAffordance.RECEPTACLE,
+        }
+
+    def test_cutlery_without_a_supporting_surface_is_only_graspable(self) -> None:
+        assert self.reasoner.affordances_for(Fork) == {ObjectAffordance.GRASPABLE}

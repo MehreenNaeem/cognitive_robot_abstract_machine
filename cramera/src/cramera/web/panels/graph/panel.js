@@ -1,11 +1,15 @@
 /* ============================================================================
- * panels/graph/panel.js — the graph view with five tabs.
+ * panels/graph/panel.js — the graph view with eight tabs.
  *
  *   Knowledge   the entity graph + CRAM architecture (double-click drills in)
  *   Kinematics  the robot's URDF tree (links as nodes, joints as edges)
  *   Plan        the executed plan tree, node border = execution status
  *   Statechart  the giskardpy motion statechart of the running motion group
  *   Transforms  the executing world's connection graph, node border = freshness
+ *   Interaction the task's selected objects and the spatial relations between them
+ *   Goal        the task's goal state as its AND/OR tree of predicates
+ *   AFG         the action feasibility graph of the last failure repair: the actions
+ *               it could choose from, by object, arm and approach direction
  *
  * The tabs in LIVE_ENDPOINT take their node status from the cramera-live bridge
  * while it is attached: structure changes rebuild the graph, pure status
@@ -28,6 +32,9 @@ Panels.define('graph', function (root, bus) {
     '    <button data-view="plan" title="the plan tree, with the execution status of every node">Plan</button>' +
     '    <button data-view="chart" title="the giskardpy motion statechart of the running motion group">Statechart</button>' +
     '    <button data-view="transforms" title="the world\'s connection graph — which frame hangs from which, and how recently it moved">Transforms</button>' +
+    '    <button data-view="interaction" title="the objects of the task and the spatial relations between them">Interaction</button>' +
+    '    <button data-view="goal" title="the goal state of the task as an AND/OR tree of predicates">Goal</button>' +
+    '    <button data-view="feasibility" title="the actions the last failure repair could choose from, by object, arm and approach direction">AFG</button>' +
     '    <span class="gt-live" id="gt-live" title="node status is streaming from the running demo">◉ live status</span>' +
     '  </div>' +
     '  <div id="graph"></div>' +
@@ -68,9 +75,51 @@ Panels.define('graph', function (root, bus) {
     plan:       { url: '/api/knowledge/view?name=plan' },
     chart:      { url: '/api/knowledge/view?name=chart' },
     transforms: { url: '/api/knowledge/view?name=transforms' },
+    // only the running demo knows the task's objects and goal: there is no recorded
+    // view to load, so these tabs wait for the bridge
+    interaction: { url: null },
+    goal: { url: null },
+    feasibility: { url: null },
   };
   // the bridge endpoint each live view polls
-  const LIVE_ENDPOINT = { plan: '/plan', chart: '/chart', transforms: '/transforms' };
+  const LIVE_ENDPOINT = {
+    plan: '/plan', chart: '/chart', transforms: '/transforms', interaction: '/interaction',
+    goal: '/goal', feasibility: '/feasibility',
+  };
+  const INTERACTION_LEGEND = [{ group: 'object', label: 'Object of the task' }];
+  // the groups are the kinds of goal expression (llm_planner's GoalExpressionKind)
+  const GOAL_LEGEND = [
+    { group: 'conjunction', label: 'AND — every operand holds' },
+    { group: 'disjunction', label: 'OR — one operand holds' },
+    { group: 'predicate', label: 'Predicate over two bodies' },
+  ];
+  // the groups are what a node of the tree stands for (llm_planner's FeasibilityNodeKind)
+  const FEASIBILITY_LEGEND = [
+    { group: 'action', label: 'Action' },
+    { group: 'object', label: 'Object it acts on' },
+    { group: 'arm', label: 'Arm that can do it' },
+    { group: 'approach_direction', label: 'Approach direction (click for its values)' },
+  ];
+  // room for a predicate box of three lines of text
+  const GOAL_SPACING = { node: 260, level: 180 };
+  // what a live-only tab shows until the bridge has sent anything
+  const WAITING = {
+    interaction: {
+      ok: true, breadcrumb: 'interaction graph', nodes: [], edges: [], details: {},
+      legend: INTERACTION_LEGEND, live: 'interaction', key: 'interaction',
+      empty: 'Attach the running demo to see the objects of its task.',
+    },
+    goal: {
+      ok: true, breadcrumb: 'goal tree', nodes: [], edges: [], details: {},
+      legend: GOAL_LEGEND, live: 'goal', key: 'goal',
+      empty: 'Attach the running demo to see the goal state of its task.',
+    },
+    feasibility: {
+      ok: true, breadcrumb: 'action feasibility', nodes: [], edges: [], details: {},
+      legend: FEASIBILITY_LEGEND, live: 'feasibility', key: 'feasibility',
+      empty: 'Attach the running demo to see the actions of its failure repairs.',
+    },
+  };
   let tab = 'knowledge';
   let view = null;            // the currently rendered payload
   const base = {};            // tab -> payload as loaded from the server
@@ -91,7 +140,8 @@ Panels.define('graph', function (root, bus) {
     }
     Graph.build({
       nodes: payload.nodes, edges: payload.edges, legend: payload.legend,
-      layout: payload.layout, arrows: !!payload.arrows,
+      layout: payload.layout, arrows: !!payload.arrows, spacing: payload.spacing,
+      edgeLabels: !!payload.edgeLabels,
       // a view may name the statuses its legend lists, instead of taking the default
       statusLegend: payload.statusLegend || false,
       key: (payload.key || tab) + '#' + stacks[tab].length,
@@ -132,6 +182,7 @@ Panels.define('graph', function (root, bus) {
     tabsEl.querySelectorAll('button').forEach(function (b) {
       b.classList.toggle('active', b.dataset.view === name);
     });
+    if (!base[name] && !TABS[name].url) base[name] = WAITING[name];
     if (!base[name]) {
       emptyEl.style.display = '';
       emptyEl.textContent = 'loading…';
@@ -210,13 +261,13 @@ Panels.define('graph', function (root, bus) {
   ];
   const FRESHNESS_LEGEND = ['MOVING', 'SETTLED', 'STALE', 'STATIC'];
   const FRAME_GROUP = { actuated: 'actuated_frame', free: 'free_frame', fixed: 'fixed_frame' };
-  const liveSig = { plan: '', chart: '', transforms: '' };
+  const liveSig = { plan: '', chart: '', transforms: '', interaction: '', goal: '', feasibility: '' };
   let liveTimer = null;
   let liveState = { on: false, url: '' };
 
   function liveSource() {
     const p = shown[tab] || base[tab];
-    return (p && p.live) || null;               // 'plan' | 'chart' | null
+    return (p && p.live) || null;   // a key of LIVE_ENDPOINT, or null
   }
 
   // drop the redundant 'Action' suffix only — a label that merely contains the word,
@@ -303,7 +354,63 @@ Panels.define('graph', function (root, bus) {
              empty: 'Attached, but the demo has not published a world yet.' };
   }
 
+  // The task's objects and the spatial relations between them: one node per object,
+  // its description shown on click, and every relation written on its arrow.
+  function interactionPayload(live) {
+    const nodes = [], details = {};
+    (live.nodes || []).forEach(function (n) {
+      nodes.push({ id: n.id, label: n.label, group: n.group,
+                   title: [n.label].concat(n.lines).join('\n') });
+      details[n.id] = { label: n.label, group: n.group, lines: n.lines };
+    });
+    const edges = (live.edges || []).map(function (e) {
+      return { from: e.from, to: e.to, kind: 'relation', label: e.label };
+    });
+    return { ok: true, breadcrumb: 'interaction graph', nodes: nodes, edges: edges,
+             details: details, legend: INTERACTION_LEGEND, arrows: true, edgeLabels: true,
+             live: 'interaction', key: 'interaction-live',
+             empty: 'Attached, but the demo has not performed an action of its task yet.' };
+  }
+
+  // The task's goal state: each connective a circle around AND or OR, each predicate a
+  // box with its bodies, and a plain arrow from each connective to its operands, laid
+  // out top-down as the tree it is. There are no details: a click shows nothing.
+  function goalPayload(live) {
+    const nodes = (live.nodes || []).map(function (n) {
+      return { id: n.id, label: n.label, group: n.group };
+    });
+    const edges = (live.edges || []).map(function (e) {
+      return { from: e.from, to: e.to, kind: 'property' };
+    });
+    return { ok: true, breadcrumb: 'goal tree', nodes: nodes, edges: edges,
+             details: {}, legend: GOAL_LEGEND, layout: 'hier', arrows: true,
+             edgeLabels: false, spacing: GOAL_SPACING, live: 'goal', key: 'goal-live',
+             empty: 'Attached, but the demo has not published a goal state yet.' };
+  }
+
+  // The actions a failure repair could choose from, laid out top-down from each action
+  // to its objects, their arms and the directions each arm approaches from; clicking a
+  // direction shows the condition values it was checked with.
+  function feasibilityPayload(live) {
+    const nodes = [], details = {};
+    (live.nodes || []).forEach(function (n) {
+      nodes.push({ id: n.id, label: n.label, group: n.group,
+                   title: [n.label].concat(n.lines).join('\n') });
+      details[n.id] = { label: n.label, group: n.group, lines: n.lines };
+    });
+    const edges = (live.edges || []).map(function (e) {
+      return { from: e.from, to: e.to, kind: 'property' };
+    });
+    return { ok: true, breadcrumb: 'action feasibility', nodes: nodes, edges: edges,
+             details: details, legend: FEASIBILITY_LEGEND, layout: 'hier', arrows: true,
+             edgeLabels: false, live: 'feasibility', key: 'feasibility-live',
+             empty: 'Attached, but no failure has been repaired yet.' };
+  }
+
   function livePayload(source, live) {
+    if (source === 'feasibility') return feasibilityPayload(live);
+    if (source === 'goal') return goalPayload(live);
+    if (source === 'interaction') return interactionPayload(live);
     if (source === 'plan') return planPayload(live);
     if (source === 'chart') return chartPayload(live);
     return transformsPayload(live);
@@ -343,7 +450,7 @@ Panels.define('graph', function (root, bus) {
       liveRefresh(true);
     } else {
       liveBadge.classList.remove('on');
-      liveSig.plan = liveSig.chart = liveSig.transforms = '';
+      Object.keys(liveSig).forEach(function (source) { liveSig[source] = ''; });
       // drop the live payloads so the live tabs fall back to the recorded bundle
       const liveTabs = Object.keys(LIVE_ENDPOINT);
       liveTabs.forEach(function (t) { delete base[t]; delete shown[t]; stacks[t] = []; });

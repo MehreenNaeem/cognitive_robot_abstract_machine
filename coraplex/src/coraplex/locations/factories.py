@@ -42,12 +42,11 @@ def _get_object_in_hand(
         test_robot,
     )
 
-    objs = set()
-    objs.update(
-        test_world.get_kinematic_structure_entities_of_branch(manipulator.tool_frame)
+    branch = test_world.get_kinematic_structure_entities_of_branch(
+        manipulator.tool_frame
     )
-    objs.remove(manipulator.tool_frame)
-    return objs.pop() if objs else None
+    held_bodies = [entity for entity in branch if entity is not manipulator.tool_frame]
+    return held_bodies[0] if held_bodies else None
 
 
 def occupancy_location(target_pose: Pose, context: Context) -> Location:

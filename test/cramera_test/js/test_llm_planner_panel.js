@@ -134,6 +134,20 @@ test('the task is drawn above the actions it was grounded into', async function 
   assert.match(drawn, /ParkArmsAction/);
 });
 
+test('the task is introduced as the task', async function () {
+  const panel = loadPanel([TASK_TREE]);
+  await flush();
+
+  assert.match(panel.root.control('#llm-plan').innerHTML, /Task: Put the bowl in the drawer/);
+});
+
+test('only the task is introduced as the task', async function () {
+  const panel = loadPanel([TASK_TREE]);
+  await flush();
+
+  assert.strictEqual(panel.root.control('#llm-plan').innerHTML.split('Task: ').length, 2);
+});
+
 test('each level is drawn one step deeper than its parent', async function () {
   const panel = loadPanel([TASK_TREE]);
   await flush();

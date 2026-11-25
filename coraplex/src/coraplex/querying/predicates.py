@@ -27,7 +27,7 @@ class GripperOccupancy:
     Semantic annotation for the gripper that should be evaluated.
     """
 
-    def check_man_occupancy(self, condition: Callable[List[Body], bool]) -> bool:
+    def check_man_occupancy(self, condition: Callable[[List[Body]], bool]) -> bool:
         """
         Checks the occupancy of the gripper against a condition.
 
@@ -42,9 +42,13 @@ class GripperOccupancy:
                 self.end_effector.tool_frame
             )
         )
-        if self.end_effector.tool_frame in bodies_under_tcp:
-            bodies_under_tcp.remove(self.end_effector.tool_frame)
-        return condition(bodies_under_tcp)
+        return condition(
+            [
+                body
+                for body in bodies_under_tcp
+                if body is not self.end_effector.tool_frame
+            ]
+        )
 
 
 @dataclass

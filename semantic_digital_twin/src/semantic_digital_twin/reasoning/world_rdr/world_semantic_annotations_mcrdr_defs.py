@@ -270,7 +270,14 @@ def conclusion_312057648930274185629403817560294738105(case) -> List[Table]:
     def world_semantic_annotations_of_type_table(case: World) -> List[Table]:
         """Get possible value(s) for World.semantic_annotations  of type Table."""
         body = variable(Body, case.kinematic_structure_entities)
-
-        return []
+        return (
+            entity(inference(Table)(root=body))
+            .where(
+                matches_regex_fullmatch(
+                    'table_area_main', body.name.name.lower()
+                ),
+            )
+            .tolist()
+        )
 
     return world_semantic_annotations_of_type_table(case)

@@ -21,7 +21,7 @@ from llm_planner.env_reasoner.object_constraints import (
     ObjectAffordanceReasoner,
     actions_available_for,
 )
-from llm_planner.env_reasoner.object_graphs import semantic_annotation_graph
+from llm_planner.env_reasoner.reasoner_graphs.object_graphs import semantic_annotation_graph
 from semantic_digital_twin.semantic_annotations.mixins import (
     HasHandle,
     HasMechanicalJoint,

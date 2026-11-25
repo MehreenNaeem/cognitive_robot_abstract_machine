@@ -25,7 +25,7 @@ from coraplex.plans.factories import sequential
 from coraplex.robot_plans.actions.core.pick_up import PickUpAction
 from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction
 from coraplex.robot_plans.actions.core.placing import PlaceAction
-from llm_planner.env_planner.triplet_generator import LanguageModelUnreachable
+from llm_planner.env_reasoner.LLM_utilities import LanguageModelUnreachable
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Bowl,
     Drawer,

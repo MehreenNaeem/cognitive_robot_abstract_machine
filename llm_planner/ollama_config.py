@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import requests
 
@@ -29,7 +28,5 @@ def chat_with_model(query,url,user_id,model=DEFAULT_MODEL,):
     result = response.json()
     return result
 
-# The endpoint and its token are read from the environment, so no credential lives in
-# the repository. Set OLLAMA_URL and OLLAMA_TOKEN before running a demo.
-URL_OLLAMA = os.environ.get("OLLAMA_URL", "")
-USER_ID_OLLAMA = os.environ.get("OLLAMA_TOKEN", "")
+URL_OLLAMA = 'URL_OLLAMA'
+USER_ID_OLLAMA = 'WRITE USER ID HERE'

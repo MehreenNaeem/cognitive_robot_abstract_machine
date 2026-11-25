@@ -22,7 +22,7 @@ from semantic_digital_twin.world_description.world_entity import Body
 
 from cramera import paths
 from cramera.live.bridge import Bridge
-from cramera.live.live_bundle import build_live_scene
+from cramera.live.live_bundle import BUNDLE_LAYOUT, build_live_scene
 
 from .test_robot_parts import ArmPart, NamedBody
 
@@ -246,6 +246,29 @@ class TestBuildLiveScene:
         build_live_scene(bridge)
 
         assert not marker.exists()
+
+    def test_the_scene_records_the_bundle_layout(self, monkeypatch, tmp_path):
+        scenes = use_scratch_scenes_directory(monkeypatch, tmp_path)
+
+        build_live_scene(attached_bridge())
+
+        assert scene_payload(scenes)["bundleLayout"] == BUNDLE_LAYOUT
+
+    def test_a_bundle_of_an_older_layout_is_rebuilt(self, monkeypatch, tmp_path):
+        scenes = use_scratch_scenes_directory(monkeypatch, tmp_path)
+        bridge = attached_bridge()
+        build_live_scene(bridge)
+        scene_file = scenes / paths.LIVE_SCENE_NAME / "scene.json"
+        older = scene_payload(scenes)
+        del older["bundleLayout"]
+        scene_file.write_text(json.dumps(older))
+        marker = scenes / paths.LIVE_SCENE_NAME / "marker"
+        marker.touch()
+
+        build_live_scene(bridge)
+
+        assert not marker.exists()
+        assert scene_payload(scenes)["bundleLayout"] == BUNDLE_LAYOUT
 
 
 # %% concurrent builds

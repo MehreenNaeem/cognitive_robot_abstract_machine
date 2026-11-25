@@ -20,6 +20,7 @@ from llm_planner.env_planner.utilities import (
     PlaceState,
     add_bounding_box_to_world,
     add_region_to_world,
+    remove_regions_from_world,
     place_grid_for,
     supporting_layer,
     unoccupied_region,
@@ -497,6 +498,35 @@ class TestAddRegionToWorld:
 
 
 # %% a body's bounding box
+
+
+class TestRemoveRegionsFromWorld:
+    def test_the_regions_are_no_longer_part_of_the_world(
+        self, apartment_world_copy
+    ) -> None:
+        countertop = apartment_world_copy.get_body_by_name(COUNTERTOP_NAME)
+        occupancy = unoccupied_region(
+            countertop, apartment_world_copy, grid=COARSE_GRID
+        )
+        regions = add_region_to_world(occupancy, countertop, apartment_world_copy)
+
+        remove_regions_from_world(regions, apartment_world_copy)
+
+        assert set(regions).isdisjoint(apartment_world_copy.regions)
+
+    def test_the_same_places_can_be_shown_again(self, apartment_world_copy) -> None:
+        countertop = apartment_world_copy.get_body_by_name(COUNTERTOP_NAME)
+        occupancy = unoccupied_region(
+            countertop, apartment_world_copy, grid=COARSE_GRID
+        )
+        remove_regions_from_world(
+            add_region_to_world(occupancy, countertop, apartment_world_copy),
+            apartment_world_copy,
+        )
+
+        regions = add_region_to_world(occupancy, countertop, apartment_world_copy)
+
+        assert set(regions) <= set(apartment_world_copy.regions)
 
 
 class TestAddBoundingBoxToWorld:

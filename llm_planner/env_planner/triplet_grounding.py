@@ -22,17 +22,30 @@ from coraplex.datastructures.grasp import GraspDescription
 from coraplex.robot_plans.actions.base import ActionDescription
 from coraplex.view_manager import ViewManager
 from llm_planner.env_planner.triplet_generator import Triplet
-from llm_planner.env_planner.utilities import DEFAULT_PLACE_SIZE, unoccupied_region
+from llm_planner.env_planner.utilities import (
+    DEFAULT_PLACE_SIZE,
+    RegionOccupancy,
+    add_region_to_world,
+    remove_regions_from_world,
+    unoccupied_region,
+)
 from semantic_digital_twin.robots.robot_parts import AbstractRobot
 from semantic_digital_twin.spatial_types.spatial_types import Pose
 from semantic_digital_twin.world import World
 from semantic_digital_twin.world_description.geometry import Scale
 from semantic_digital_twin.world_description.world_entity import (
     Body,
+    KinematicStructureEntity,
+    Region,
     SemanticAnnotation,
 )
 
 logger = logging.getLogger(__name__)
+
+ARMS = (Arms.RIGHT, Arms.LEFT)
+"""
+The arms of the robot an action can be performed with.
+"""
 
 
 class ActionArgument(StrEnum):
@@ -217,7 +230,8 @@ class TripletGrounding:
 
     arm: Arms = Arms.LEFT
     """
-    The arm every action is performed with.
+    The arm an action is performed with when :meth:`arm_for` finds no arm the robot's
+    grippers call for.
     """
 
     placing_yaw: float = 0.0
@@ -233,6 +247,17 @@ class TripletGrounding:
     vertical_alignment: VerticalAlignment = VerticalAlignment.NoAlignment
     """
     How the end effector lines up with the object along z.
+    """
+
+    show_occupancy: bool = False
+    """
+    Whether the places searched for a free place are put into the world as regions, so
+    a viewer draws which of them are free and which are taken.
+    """
+
+    _shown_regions: List[Region] = field(default_factory=list, init=False)
+    """
+    The regions of the newest search shown, replaced by the next one.
     """
 
     _chosen: Dict[type[SemanticAnnotation], Body] = field(
@@ -326,13 +351,57 @@ class TripletGrounding:
         robot = self.robot()
         return None if robot is None else robot.root
 
-    def grasp_for(self, action: type[ActionDescription]) -> Optional[GraspDescription]:
+    def held_bodies(
+        self, arm: Arms, robot: AbstractRobot
+    ) -> List[KinematicStructureEntity]:
+        """
+        :param arm: The arm whose gripper to look in.
+        :param robot: The robot the arm belongs to.
+        :return: Everything attached below the gripper's tool frame; empty when the
+            gripper is free.
+        """
+        tool_frame = ViewManager.get_end_effector_view(arm, robot).tool_frame
+        return [
+            entity
+            for entity in self.world.get_kinematic_structure_entities_of_branch(
+                tool_frame
+            )
+            if entity is not tool_frame
+        ]
+
+    def arm_for(self, source_object_body: Body) -> Arms:
+        """
+        The arm an action on an object is performed with.
+
+        The arm already holding the object performs the action. Otherwise, when only
+        one gripper is free, that gripper's arm does. In every other case - both free,
+        neither free, or no robot - :attr:`arm` does.
+
+        :param source_object_body: The body the action is performed on.
+        :return: The arm to perform the action with.
+        """
+        robot = self.robot()
+        if robot is None:
+            return self.arm
+        held_by_arm = {arm: self.held_bodies(arm, robot) for arm in ARMS}
+        for arm, held in held_by_arm.items():
+            if source_object_body in held:
+                return arm
+        free_arms = [arm for arm, held in held_by_arm.items() if not held]
+        if len(free_arms) == 1:
+            return free_arms[0]
+        return self.arm
+
+    def grasp_for(
+        self, action: type[ActionDescription], arm: Arms
+    ) -> Optional[GraspDescription]:
         """
         How the robot takes hold of an object it performs an action on.
 
         :param action: The action the grasp is described for.
-        :return: The grasp the action's end effector performs, or None if the world
-            holds no robot, which is logged as a warning.
+        :param arm: The arm whose end effector takes hold.
+        :return: The grasp the arm's end effector performs, or None if the world holds
+            no robot, which is logged as a warning.
         """
         robot = self.robot()
         if robot is None:
@@ -341,7 +410,7 @@ class TripletGrounding:
         return GraspDescription(
             self.approach_direction,
             self.vertical_alignment,
-            ViewManager.get_end_effector_view(self.arm, robot),
+            ViewManager.get_end_effector_view(arm, robot),
         )
 
     def target_location_on(
@@ -357,9 +426,12 @@ class TripletGrounding:
         :return: The pose to place at, or None if nothing fits on the target body any
             more, which is logged as a warning.
         """
-        occupancy = unoccupied_region(
-            target_body, self.world, place_size=self.size_of(source_body)
-        )
+        place_size = self.size_of(source_body)
+        if self.show_occupancy:
+            self.clear_shown_search()
+        occupancy = unoccupied_region(target_body, self.world, place_size=place_size)
+        if self.show_occupancy:
+            self.show_search(occupancy, target_body, place_size)
         place = occupancy.closest_free_place(source_body.global_pose)
         if place is None:
             logger.warning("%s", NoFreePlace(target_body))
@@ -373,6 +445,28 @@ class TripletGrounding:
             yaw=self.placing_yaw,
             reference_frame=place.reference_frame,
         )
+
+    def show_search(
+        self, occupancy: RegionOccupancy, target_body: Body, place_size: Scale
+    ) -> None:
+        """
+        Put the searched places into the world as regions.
+
+        :param occupancy: The free and the taken places of the search.
+        :param target_body: The body the places were searched on.
+        :param place_size: The size each place was checked with.
+        """
+        self._shown_regions = add_region_to_world(
+            occupancy, target_body, self.world, place_size
+        )
+
+    def clear_shown_search(self) -> None:
+        """
+        Take the regions of the previous search out of the world, so they neither stay
+        drawn nor take up the places the next search checks.
+        """
+        remove_regions_from_world(self._shown_regions, self.world)
+        self._shown_regions = []
 
     @staticmethod
     def size_of(body: Body) -> Scale:
@@ -391,8 +485,9 @@ class TripletGrounding:
         Resolve a triplet into the things its action plan is performed with.
 
         :param triplet: The checked triplet to resolve.
-        :return: The bodies its object types name, the arm, and the pose to place at
-            when the action puts something down and something still fits there.
+        :return: The bodies its object types name, the arm :meth:`arm_for` chooses,
+            and the pose to place at when the action puts something down and something
+            still fits there.
         :raises ObjectNotInWorld: If the world holds neither of its objects.
         """
         source_object_body = self.body_of(triplet.source_object)
@@ -406,16 +501,17 @@ class TripletGrounding:
             target_location = self.target_location_on(
                 target_object_body or source_object_body, source_object_body
             )
+        arm = self.arm_for(source_object_body)
         grasp_description = None
         if self.needs(triplet.action, ActionArgument.GRASP):
-            grasp_description = self.grasp_for(triplet.action)
+            grasp_description = self.grasp_for(triplet.action, arm)
         return GroundedTriplet(
             action=triplet.action,
             source_object_body=source_object_body,
             target_object_body=target_object_body,
             target_location=target_location,
             grasp_description=grasp_description,
-            arm=self.arm,
+            arm=arm,
         )
 
 

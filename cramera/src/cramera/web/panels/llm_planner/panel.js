@@ -1,10 +1,11 @@
 /* ============================================================================
  * panels/llm_planner/panel.js — the LLM planner's tree.
  *
- * Three levels, from the task down to the robot: the task statement a language model
- * was given, the actions it grounded the task into, and the plan steps each of those
- * is performed as (GET /llm_plan on the running demo's bridge). Every node carries the
- * status its plan reports, so a step colours as it runs.
+ * The task statement a language model was given, introduced as "Task: …", and under
+ * it either the actions it grounded the task into with the plan steps each of those is
+ * performed as, or the summary of every executed triplet and repair action (GET
+ * /llm_plan on the running demo's bridge). Every node carries its status, so a row
+ * colours as it runs.
  *
  * Drawn as nested rows rather than through the graph panel's network, which is a single
  * shared instance and cannot be mounted twice. The tree outlives the demo that published
@@ -87,10 +88,14 @@ Panels.define('llm-planner', function (root, bus) {
     }).join('');
   }
 
+  //: what the root row's label is introduced with, so it reads as the task
+  const TASK_PREFIX = 'Task: ';
+
   function row(node, depth) {
+    const label = node.parent === null ? TASK_PREFIX + node.label : node.label;
     return '<div class="llm-row ' + statusClass(node.status) + '" style="--depth:' + depth + '">' +
       '<span class="llm-dot"></span>' +
-      '<span class="llm-label">' + esc(node.label) + '</span>' +
+      '<span class="llm-label">' + esc(label) + '</span>' +
       '<span class="llm-status">' + esc(String(node.status || '').toLowerCase()) + '</span>' +
       '</div>';
   }

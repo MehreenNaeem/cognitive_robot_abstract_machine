@@ -18,6 +18,17 @@ HTTP endpoints of the live bridge (default port 8765).
     GET /llm_plan {task, signature, nodes: [{id, parent, label, status, group}]}  the
                   LLM planner's tree: the task, the actions it was grounded into and the
                   plan steps each of those performs (see :mod:`cramera.live.llm_plan`)
+    GET /interaction  {signature, nodes: [{id, label, group, lines, position}],
+                       edges: [{from, to, label}]}  the selected objects of the task and
+                       the spatial relations between them (see
+                       :mod:`cramera.live.interaction_graph`)
+    GET /goal    {signature, goal, nodes: [{id, parent, label, group, lines}]}  the
+                 task's goal state in PDDL and as its AND/OR tree (see
+                 :mod:`cramera.live.goal_tree`)
+    GET /feasibility  {signature, nodes: [{id, label, group, lines}],
+                       edges: [{from, to}]}  the actions a failure repair can choose
+                       from, by object, arm and approach direction (see
+                       :mod:`cramera.live.feasibility_tree`)
     GET /plan    {signature, nodes: [{id, parent, kind, label, status, derived}]}
     GET /chart   {signature, title,
                   nodes: [{id, parent, name, class_name, life_cycle, observation}],
@@ -82,8 +93,8 @@ logger = get_logger(__name__)
 try:
     from llm_planner.env_planner.triplet_generator import (
         ActionSequencePredictionError,
-        LanguageModelUnreachable,
     )
+    from llm_planner.env_reasoner.LLM_utilities import LanguageModelUnreachable
 
     from cramera.action_sequence import NoTask
     from cramera.live.action_sequence import LiveActionSequence, NoAttachedWorld
@@ -152,6 +163,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return self._send_json(self.bridge.get_state())
         if self.path.startswith("/llm_plan"):
             return self._send_json(self.bridge.get_llm_plan())
+        if self.path.startswith("/interaction"):
+            return self._send_json(self.bridge.get_interaction_graph())
+        if self.path.startswith("/goal"):
+            return self._send_json(self.bridge.get_goal_tree())
+        if self.path.startswith("/feasibility"):
+            return self._send_json(self.bridge.get_feasibility_tree())
         if self.path.startswith("/plan"):
             return self._send_json(self.bridge.get_plan())
         if self.path.startswith("/chart"):

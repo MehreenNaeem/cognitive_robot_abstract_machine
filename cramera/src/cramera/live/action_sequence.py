@@ -13,10 +13,10 @@ from dataclasses import dataclass, field
 from typing_extensions import List, TYPE_CHECKING
 
 from llm_planner.env_planner.triplet_generator import (
-    LanguageModel,
     preprocessing_objects,
     semantic_annotation_in_world,
 )
+from llm_planner.env_reasoner.LLM_utilities import LanguageModel
 from semantic_digital_twin.semantic_annotations.semantic_annotations import Handle
 
 from cramera.action_sequence import (
