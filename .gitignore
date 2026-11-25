@@ -184,3 +184,10 @@ CLAUDE.local.md
 # Scratch state, never committed: a stale copy read as current is a pass acting on a
 # stack that has since moved.
 .claude/stack/board.json
+
+# LLM planner: local object and scene datasets, too large for git, a MuJoCo log, and a
+# local test script.
+/llm_planner/objects_data/
+/llm_planner/resources/usd/
+/llm_planner/objects_testing.py
+MUJOCO_LOG.TXT
